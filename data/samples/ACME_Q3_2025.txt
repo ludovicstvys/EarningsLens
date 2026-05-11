@@ -1,0 +1,41 @@
+ACME Q3 2025 Earnings Conference Call
+
+Operator: Good morning, and welcome to the ACME third quarter 2025 earnings conference call. Today's call includes prepared remarks from management followed by a question and answer session.
+
+Jane Smith - CEO: Thank you, operator. We delivered a resilient quarter in an environment that remained somewhat mixed across segments and geographies. Revenue grew, customer engagement remained constructive, and adoption of our automation platform continued to progress, although activity levels were somewhat uneven across larger enterprise opportunities. We believe the core value proposition remains strong, and we continue to see interest in workflow modernization, AI-enabled onboarding, and analytics-driven operations.
+
+As we moved through the quarter, several customers became more deliberate in budget reviews and internal approval sequencing. That did not change our long-term view, but it did create some variability in the timing of larger commitments. We are broadly focused on execution, supporting customers through a more complex decision environment, and maintaining flexibility in how we allocate go-to-market resources. We also anticipate that disciplined investment and close alignment with customers will position us well over time.
+
+From a product perspective, adoption of analytics and automation features continued, and we made progress on roadmap priorities that should support retention and longer-term expansion. At the same time, we are navigating a backdrop with more uncertainty, some macro headwinds, and more active scrutiny around deal scope and timing. We think our platform remains well positioned, but we are going forward with a measured stance and a strong focus on customer value, productivity, and operational discipline.
+
+John Doe - CFO: Thanks, Jane. Financial performance reflected stable recurring revenue and solid gross margin, but the quarter also included some softness in enterprise deal timing and a somewhat choppy conversion pattern late in the period. We continue to believe the business is healthy, although we are seeing several customers extend review cycles, break large deployments into phases, and apply more scrutiny to expansion decisions.
+
+Operating margin remained positive, and cash generation was sound, but we are planning prudently. We may continue to prioritize efficiency, sequence hiring carefully, and manage investment levels based on demand visibility in the near term. We believe that is the appropriate posture given the elongated sales cycles, the broader macro backdrop, and the pressure we are seeing in certain large-account decisions.
+
+Operator: We will now begin the question and answer session.
+
+Mark Chen - Goldman Sachs: Can you quantify how much sales cycles elongated in the quarter and whether the softness was concentrated in a specific customer segment?
+
+Jane Smith - CEO: We did see some elongation, particularly in larger deals, but the exact pattern varied by account, by geography, and by internal customer process. I would say generally that customers are being more thoughtful, and we are working closely with them to support decision making over time.
+
+Sara Lee - Morgan Stanley: How much of the quarter's pressure came from macro conditions versus competition, and should we think about net retention stepping down from here?
+
+Jane Smith - CEO: It is difficult to isolate a single factor because the environment is somewhat dynamic. We believe our positioning remains competitive, and we are focused on execution, customer success, and the long-term roadmap rather than trying to over-attribute short-term movement.
+
+David Park - JPMorgan: Are customers deferring expansions, and can you quantify what you saw in churn or downsell relative to your internal expectations?
+
+John Doe - CFO: We did see some deferral behavior at the margin, and there was some pressure in discretionary expansions, particularly where budgets required extra approvals. We are not going to provide the detailed churn bridge today, but I would say the environment was softer than we had anticipated.
+
+Emily Ross - Barclays: Should we read the new comments on macro headwinds and elongated sales cycles as an indication that guidance assumptions are changing?
+
+John Doe - CFO: We are not updating formal guidance outside the normal process. What I can say is that we are planning with appropriate caution, we are assuming some continued variability, and we would expect customers to remain measured in the near term.
+
+James Wu - UBS: What are you seeing in pipeline quality, and are there specific industries where weakness is becoming more visible?
+
+Jane Smith - CEO: Pipeline quality remains acceptable overall, but conversion is more variable, particularly in customers with larger cross-functional approvals. We are seeing some weakness in sectors that are more sensitive to budget pressure, and that is one reason we are staying disciplined.
+
+Rachel Kim - Citi: Have discounting levels changed, and is pricing pressure becoming a bigger factor in competitive situations?
+
+Jane Smith - CEO: There are situations where customers are more price sensitive, and we are responding thoughtfully. I would not overstate it, but competitive pressure and pricing pressure are part of the broader environment we are managing.
+
+Operator: This concludes today's call.

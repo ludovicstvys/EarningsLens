@@ -1,0 +1,37 @@
+ACME Q2 2025 Earnings Conference Call
+
+Operator: Good morning, and welcome to the ACME second quarter 2025 earnings conference call. Today's call includes prepared remarks from management followed by a question and answer session.
+
+Jane Smith - CEO: Thank you, operator. We delivered a strong quarter with balanced execution across new logo wins, expansion inside the enterprise base, and continued adoption of our workflow automation suite. Revenue growth was supported by healthy demand in North America, steady customer retention, and a product mix that continued to shift toward higher-value subscription bundles. We introduced several enhancements to our analytics layer, expanded our AI-assisted onboarding tools, and deepened integrations with leading data platforms. Customers responded well to the broader platform story because it reduced implementation time and improved time to value.
+
+We also made progress in the enterprise segment, where larger customers adopted additional modules around compliance tracking, automation design, and cross-team orchestration. Net retention remained healthy because usage trends were stable and cross-sell activity broadened into newer functions. Our go-to-market teams executed with discipline, partner channels added incremental pipeline coverage, and international regions contributed a modest but growing share of bookings. Overall, the tone from customers remained constructive, with demand patterns consistent across the quarter and no meaningful shift in budget approvals.
+
+Operationally, we improved support response times, shortened deployment cycles, and increased customer success coverage for strategic accounts. These efforts helped sustain retention, improve product adoption, and increase confidence in longer-term account expansion. We remain focused on profitable growth, disciplined hiring, and measured investment in roadmap priorities that can compound platform value over time. We are entering the back half of the year from a position of strength, with a balanced pipeline, healthy renewals, and a clear execution plan.
+
+John Doe - CFO: Thanks, Jane. Revenue growth was in line with our expectations, gross margin expanded modestly, and operating margin improved through better utilization, gradual services efficiency gains, and continued expense discipline. Free cash flow conversion remained solid, and the balance sheet stayed healthy with no meaningful changes to our liquidity profile. From a mix standpoint, enterprise customers remained the primary growth driver, with healthy contribution from renewals, upsell, and a stable pace of new logo adds.
+
+We also saw favorable unit economics in implementation services as teams became more productive and partner-led deployments increased. Pricing realization was consistent with plan, churn remained contained, and customer payment behavior stayed normal. Taken together, the quarter reflected durable execution rather than temporary benefit. We continue to invest in product development, sales productivity, and selective international expansion while maintaining margin discipline.
+
+Operator: We will now begin the question and answer session.
+
+Mark Chen - Goldman Sachs: Thanks for taking my question. Can you talk about demand trends in the enterprise pipeline and whether buying behavior changed at all as customers reviewed software budgets?
+
+Jane Smith - CEO: Demand trends were steady throughout the quarter. Pipeline conversion was consistent with our internal expectations, larger deals followed normal approval paths, and we did not observe a meaningful change in buying behavior relative to the prior quarter.
+
+Sara Lee - Morgan Stanley: On net retention, how should we think about expansion and seat growth in the installed base over the next few quarters?
+
+Jane Smith - CEO: Expansion remained broad-based, particularly in customers adopting a second or third module. Seat growth was healthy, usage trends were stable, and the renewal environment continued to support strong retention.
+
+David Park - JPMorgan: Could you quantify the primary drivers of margin improvement and whether the gains were structural?
+
+John Doe - CFO: The improvement came primarily from better services utilization, controlled hiring, and incremental productivity in onboarding and support. We did not have a material one-time tailwind in the quarter, so we view the drivers as operational rather than temporary.
+
+Emily Ross - Barclays: How are customers responding to the new analytics capabilities you launched this quarter?
+
+Jane Smith - CEO: Adoption has been encouraging. Customers like the tighter workflow visibility and faster reporting, and those capabilities are increasingly helping us position the platform as a broader operating system rather than a point solution.
+
+James Wu - UBS: Any update on international expansion and partner channel contribution?
+
+Jane Smith - CEO: International remained a modest contributor, but it improved year over year, and partner channels helped extend coverage efficiently. We are staying disciplined and scaling those motions based on productivity.
+
+Operator: This concludes today's call.
