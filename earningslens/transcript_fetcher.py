@@ -80,14 +80,19 @@ def _format_alpha_vantage_limit_message(note: str) -> str:
 def _get(params: dict) -> dict:
     api_key = _require_api_key()
     for attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
-        _wait_for_rate_limit_window()
-        response = requests.get(
-            config.ALPHA_VANTAGE_BASE_URL,
-            params={**params, "apikey": api_key},
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            _wait_for_rate_limit_window()
+            response = requests.get(
+                config.ALPHA_VANTAGE_BASE_URL,
+                params={**params, "apikey": api_key},
+                timeout=30,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise TranscriptFetchError(f"Transcript request failed: {exc}") from exc
+        except ValueError as exc:
+            raise TranscriptFetchError("Transcript service returned an invalid JSON response.") from exc
         if "Information" in payload:
             raise TranscriptFetchError(payload["Information"])
         if "Note" in payload:

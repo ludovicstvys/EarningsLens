@@ -16,6 +16,13 @@ EarningsLens compares two consecutive earnings call transcripts from the same co
 
 The output is analytical only. It is not investment advice.
 
+Recent reliability improvements:
+- parser confidence and low-confidence Q&A suppression
+- cached transcript fetch / parse paths for faster reruns
+- per-analysis timeout and fallback isolation
+- diagnostics and provenance in the Streamlit UI
+- regression tests plus a local health-check script
+
 ## Setup
 
 ```bash
@@ -39,6 +46,10 @@ python scripts/make_samples.py
 
 # 6. Run
 streamlit run app.py
+
+# 7. Optional checks
+./.venv/bin/pytest -q
+./.venv/bin/python scripts/health_check.py
 ```
 
 First run downloads FinBERT (~440 MB), MiniLM (~80 MB), and the local instruct model configured in `.env`.
@@ -47,6 +58,12 @@ First run downloads FinBERT (~440 MB), MiniLM (~80 MB), and the local instruct m
 
 - `Search company`: search by exact ticker, select a match, load recent quarters, pick the two quarters to compare, and analyze them via Alpha Vantage
 - `Use sample`: use the built-in synthetic demo pairs
+
+## Diagnostics And Controls
+
+- Sidebar controls let you tune thresholds, Q&A confidence filtering, and per-analysis timeout.
+- The app exposes analysis provenance so you can tell whether an output came from the main model path or a fallback.
+- Enable `Show diagnostics` in the sidebar to inspect parsed speaker roles and turn segmentation.
 
 ## Local Model Choice
 

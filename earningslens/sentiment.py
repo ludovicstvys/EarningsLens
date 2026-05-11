@@ -65,6 +65,8 @@ def analyze_sentiment(transcript: Transcript) -> SentimentAnalysis:
             qa_score=prepared_score,
             gap=0.0,
             flagged=False,
+            source="prepared_fallback",
+            notes=["No Q&A text detected; reused prepared-remarks sentiment for the Q&A score."],
         )
 
     qa_score = _score(qa_text)
@@ -74,4 +76,5 @@ def analyze_sentiment(transcript: Transcript) -> SentimentAnalysis:
         qa_score=qa_score,
         gap=gap,
         flagged=gap <= config.SENTIMENT_FLAG_THRESHOLD,
+        source="finbert",
     )

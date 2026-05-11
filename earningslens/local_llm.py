@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from typing import Any
 
 import torch
 
@@ -63,14 +64,42 @@ def _build_prompt(prompt: str) -> str:
     return f"System: {messages[0]['content']}\nUser: {prompt}\nAssistant:"
 
 
+def _max_input_tokens(tokenizer: Any) -> int:
+    model_max_length = int(getattr(tokenizer, "model_max_length", 2048) or 2048)
+    if model_max_length <= 0 or model_max_length > 32768:
+        return 4096
+    return max(512, min(model_max_length, 4096))
+
+
+def _prepare_inputs(prompt_text: str, tokenizer: Any, device: str) -> dict[str, torch.Tensor]:
+    max_input_tokens = _max_input_tokens(tokenizer)
+    encoded = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=True, truncation=False)
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
+    total_tokens = int(input_ids.shape[1])
+    if total_tokens > max_input_tokens:
+        head_tokens = max_input_tokens * 3 // 5
+        tail_tokens = max_input_tokens - head_tokens
+        LOGGER.warning(
+            "Prompt exceeded model input budget (%s > %s tokens); truncating with head/tail preservation.",
+            total_tokens,
+            max_input_tokens,
+        )
+        input_ids = torch.cat([input_ids[:, :head_tokens], input_ids[:, -tail_tokens:]], dim=1)
+        attention_mask = torch.cat([attention_mask[:, :head_tokens], attention_mask[:, -tail_tokens:]], dim=1)
+    return {
+        "input_ids": input_ids.to(device),
+        "attention_mask": attention_mask.to(device),
+    }
+
+
 def generate_text(prompt: str, max_new_tokens: int = 300) -> str:
     tokenizer = _get_tokenizer()
     model = _get_model()
     device, _ = _device_config()
 
     prompt_text = _build_prompt(prompt)
-    inputs = tokenizer(prompt_text, return_tensors="pt", truncation=True, max_length=2048)
-    inputs = {key: value.to(device) for key, value in inputs.items()}
+    inputs = _prepare_inputs(prompt_text, tokenizer, device)
 
     with torch.no_grad():
         generated = model.generate(

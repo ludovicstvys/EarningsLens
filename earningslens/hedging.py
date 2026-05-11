@@ -34,12 +34,22 @@ def analyze_hedging(current: Transcript, prior: Transcript) -> HedgingAnalysis:
     prior_words = max(len(WORD_RE.findall(prior_text)), 1)
     current_density = sum(current_counts.values()) / current_words * 1000
     prior_density = sum(prior_counts.values()) / prior_words * 1000
-    delta_pct = ((current_density - prior_density) / prior_density * 100) if prior_density > 0 else 0.0
+    if prior_density > 0:
+        delta_pct = (current_density - prior_density) / prior_density * 100
+    elif current_density > 0:
+        delta_pct = 999.0
+    else:
+        delta_pct = 0.0
+    notes: list[str] = []
+    if delta_pct == 999.0:
+        notes.append("Current quarter introduced hedge language where the prior quarter had none.")
 
     return HedgingAnalysis(
         current_density=current_density,
         prior_density=prior_density,
         delta_pct=delta_pct,
-        flagged=delta_pct >= config.HEDGING_FLAG_THRESHOLD,
+        flagged=(delta_pct >= config.HEDGING_FLAG_THRESHOLD) or (prior_density == 0 and current_density > 0),
         top_hedges=current_counts.most_common(5),
+        source="lexicon",
+        notes=notes,
     )

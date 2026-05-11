@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 Section = Literal["prepared", "qa"]
 Role = Literal["operator", "executive", "analyst", "unknown"]
@@ -12,9 +12,12 @@ Signal = Literal["green", "amber", "red"]
 class SpeakerTurn(BaseModel):
     idx: int
     speaker: str
+    title: Optional[str] = None
     role: Role
+    role_confidence: float = 0.0
     section: Section
     text: str
+    parse_notes: list[str] = Field(default_factory=list)
 
 
 class Transcript(BaseModel):
@@ -23,6 +26,9 @@ class Transcript(BaseModel):
     quarter: str
     turns: list[SpeakerTurn]
     raw_text: str
+    qa_boundary_detected: bool = False
+    parse_confidence: float = 0.0
+    parser_notes: list[str] = Field(default_factory=list)
 
     @property
     def prepared_text(self) -> str:
@@ -42,6 +48,8 @@ class SentimentAnalysis(BaseModel):
     qa_score: float
     gap: float
     flagged: bool
+    source: str = "model"
+    notes: list[str] = Field(default_factory=list)
 
 
 class HedgingAnalysis(BaseModel):
@@ -50,6 +58,8 @@ class HedgingAnalysis(BaseModel):
     delta_pct: float
     flagged: bool
     top_hedges: list[tuple[str, int]]
+    source: str = "lexicon"
+    notes: list[str] = Field(default_factory=list)
 
 
 class TopicDrift(BaseModel):
@@ -59,6 +69,8 @@ class TopicDrift(BaseModel):
     dropped_themes: list[str]
     semantic_similarity: float
     flagged: bool
+    source: str = "model"
+    notes: list[str] = Field(default_factory=list)
 
 
 class RiskVocabItem(BaseModel):
@@ -78,6 +90,10 @@ class EvasionScore(BaseModel):
     responsiveness: int
     reasoning: str
     flagged: bool
+    pair_confidence: float = 1.0
+    low_confidence: bool = False
+    source: str = "model"
+    notes: list[str] = Field(default_factory=list)
 
 
 class EarningsBrief(BaseModel):
@@ -93,3 +109,6 @@ class EarningsBrief(BaseModel):
     flag_count: int
     executive_summary: str
     bullet_points: list[str]
+    analysis_provenance: dict[str, str] = Field(default_factory=dict)
+    analysis_notes: dict[str, list[str]] = Field(default_factory=dict)
+    parser_overview: dict[str, object] = Field(default_factory=dict)
