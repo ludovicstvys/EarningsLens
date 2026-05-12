@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from earningslens import prompts
 from earningslens.local_llm import generate_text
 from earningslens.models import EarningsBrief, EvasionScore, HedgingAnalysis, RiskVocabItem, SentimentAnalysis, TopicDrift
 
 LOGGER = logging.getLogger(__name__)
+PLACEHOLDER_RE = re.compile(r"<[^>]*(?:bullet|sentence|words?|optional|specifics|data above|summary)[^>]*>", re.IGNORECASE)
 
 
 def _extract_json(text: str) -> dict:
@@ -100,6 +102,25 @@ def _build_fallback_bullets(
     return bullets[:5]
 
 
+def _contains_template_placeholder(text: str) -> bool:
+    lowered = text.strip().lower()
+    if PLACEHOLDER_RE.search(text):
+        return True
+    return lowered in {"<bullet>", "<summary>"} or lowered.startswith("<bullet ")
+
+
+def _clean_bullet_points(raw_items: object) -> list[str]:
+    if not isinstance(raw_items, list):
+        return []
+    bullets: list[str] = []
+    for item in raw_items:
+        bullet = str(item).strip()
+        if not bullet or _contains_template_placeholder(bullet):
+            continue
+        bullets.append(bullet)
+    return bullets[:5]
+
+
 def _parse_synthesis_payload(prompt: str) -> dict | None:
     last_error: Exception | None = None
     retry_suffix = (
@@ -165,7 +186,9 @@ def synthesize(
     )
     payload = _parse_synthesis_payload(prompt) or {}
     executive_summary = str(payload.get("executive_summary", "")).strip()
-    bullet_points = [str(item).strip() for item in payload.get("bullet_points", []) if str(item).strip()]
+    if _contains_template_placeholder(executive_summary):
+        executive_summary = ""
+    bullet_points = _clean_bullet_points(payload.get("bullet_points", []))
     synthesis_source = "llm_json"
     synthesis_notes = list((analysis_notes or {}).get("synthesis", []))
     if not executive_summary:
@@ -180,7 +203,7 @@ def synthesize(
         )
         synthesis_source = "fallback_summary"
         synthesis_notes.append("Executive summary came from deterministic synthesis fallback.")
-    if not bullet_points:
+    if len(bullet_points) < 3:
         bullet_points = _build_fallback_bullets(
             sentiment=sentiment,
             hedging=hedging,
@@ -189,7 +212,7 @@ def synthesize(
             evasions=evasions,
         )
         synthesis_source = "fallback_summary"
-        synthesis_notes.append("Bullet points came from deterministic synthesis fallback.")
+        synthesis_notes.append("Bullet points came from deterministic synthesis fallback because model bullets were missing or template-like.")
 
     final_provenance = dict(analysis_provenance or {})
     final_notes = dict(analysis_notes or {})

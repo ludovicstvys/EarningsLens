@@ -59,15 +59,7 @@ def analyze_sentiment(transcript: Transcript) -> SentimentAnalysis:
 
     qa_text = _analysis_section_text(transcript, "qa")
     if not qa_text.strip():
-        LOGGER.warning("Transcript %s %s has no Q&A text; using prepared score as fallback.", transcript.company, transcript.quarter)
-        return SentimentAnalysis(
-            prepared_score=prepared_score,
-            qa_score=prepared_score,
-            gap=0.0,
-            flagged=False,
-            source="prepared_fallback",
-            notes=["No Q&A text detected; reused prepared-remarks sentiment for the Q&A score."],
-        )
+        raise ValueError(f"Transcript {transcript.company} {transcript.quarter} has no parsed Q&A text.")
 
     qa_score = _score(qa_text)
     gap = qa_score - prepared_score

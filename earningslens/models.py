@@ -82,11 +82,17 @@ class RiskVocabItem(BaseModel):
     delta_pct: float
 
 
+class EvasionAnswerTurn(BaseModel):
+    speaker: str
+    text: str
+
+
 class EvasionScore(BaseModel):
     question: str
     question_speaker: str
     answer: str
     answer_speaker: str
+    answer_turns: list[EvasionAnswerTurn] = Field(default_factory=list)
     responsiveness: int
     reasoning: str
     flagged: bool

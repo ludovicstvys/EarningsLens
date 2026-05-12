@@ -16,7 +16,7 @@ from earningslens import config
 from earningslens.evasion import analyze_evasion
 from earningslens.hedging import analyze_hedging
 from earningslens.local_llm import warmup_local_llm
-from earningslens.models import EvasionScore, HedgingAnalysis, RiskVocabItem, SentimentAnalysis, TopicDrift
+from earningslens.models import HedgingAnalysis, RiskVocabItem, TopicDrift
 from earningslens.parser import parse_transcript
 from earningslens.risk_vocab import analyze_risk_vocab
 from earningslens.sentiment import analyze_sentiment, warmup_sentiment_model
@@ -35,20 +35,6 @@ if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 SAMPLES = {
-    "ACME Q2→Q3 2025": {
-        "company": "ACME",
-        "current_quarter": "Q3 2025",
-        "prior_quarter": "Q2 2025",
-        "current_path": Path("data/samples/ACME_Q3_2025.txt"),
-        "prior_path": Path("data/samples/ACME_Q2_2025.txt"),
-    },
-    "BRAVO Q1→Q2 2025": {
-        "company": "BRAVO",
-        "current_quarter": "Q2 2025",
-        "prior_quarter": "Q1 2025",
-        "current_path": Path("data/samples/BRAVO_Q2_2025.txt"),
-        "prior_path": Path("data/samples/BRAVO_Q1_2025.txt"),
-    },
     "Microsoft Q4 2025→Q1 2026 (Real)": {
         "company": "Microsoft",
         "current_quarter": "Q1 2026",
@@ -99,18 +85,13 @@ def _render_sidebar_options() -> None:
         "Show diagnostics",
         value=bool(st.session_state.get("show_debug", False)),
     )
-
-
-def _fallback_sentiment(reason: str, current) -> SentimentAnalysis:
-    qa_missing = not current.qa_text.strip()
-    prepared = 0.0
-    return SentimentAnalysis(
-        prepared_score=prepared,
-        qa_score=prepared,
-        gap=0.0,
-        flagged=False,
-        source="fallback",
-        notes=[reason] + (["Transcript had no parsed Q&A text."] if qa_missing else []),
+    st.session_state["analysis_timeout_seconds"] = st.sidebar.slider(
+        "Analysis timeout",
+        min_value=30,
+        max_value=300,
+        value=int(st.session_state.get("analysis_timeout_seconds", config.ANALYSIS_TIMEOUT_SECONDS)),
+        step=15,
+        help="Increase this on CPU-only machines so local Q&A scoring can finish.",
     )
 
 
@@ -141,24 +122,6 @@ def _fallback_topics(reason: str) -> TopicDrift:
 
 def _fallback_risk_vocab() -> list[RiskVocabItem]:
     return []
-
-
-def _fallback_evasions(reason: str) -> list[EvasionScore]:
-    return [
-        EvasionScore(
-            question="",
-            question_speaker="",
-            answer="",
-            answer_speaker="",
-            responsiveness=10,
-            reasoning=reason,
-            flagged=False,
-            pair_confidence=0.0,
-            low_confidence=True,
-            source="fallback",
-            notes=[reason],
-        )
-    ]
 
 
 def _load_inputs(mode: str):
@@ -352,12 +315,13 @@ def _run_analysis(input_payload: dict):
         "parser": [*current.parser_notes, *prior.parser_notes],
     }
     analysis_provenance: dict[str, str] = {}
+    analysis_errors: list[str] = []
+    failed_analyses: set[str] = set()
+    timeout_seconds = int(st.session_state.get("analysis_timeout_seconds", config.ANALYSIS_TIMEOUT_SECONDS))
     fallback_builders = {
-        "sentiment": lambda reason: _fallback_sentiment(reason, current),
         "hedging": lambda reason: _fallback_hedging(reason),
         "topics": lambda reason: _fallback_topics(reason),
         "risk_vocab": lambda reason: _fallback_risk_vocab(),
-        "evasions": lambda reason: _fallback_evasions(reason),
     }
 
     executor = ThreadPoolExecutor(max_workers=5)
@@ -381,7 +345,7 @@ def _run_analysis(input_payload: dict):
                 progress.progress(min(80, 20 + int(fraction * 50)), text=label)
 
             elapsed = time.monotonic() - started_at
-            timed_out = elapsed >= config.ANALYSIS_TIMEOUT_SECONDS
+            timed_out = elapsed >= timeout_seconds
             for future in done:
                 name = pending.pop(future)
                 try:
@@ -403,27 +367,51 @@ def _run_analysis(input_payload: dict):
                 except Exception as exc:
                     LOGGER.exception("%s analysis failed", name)
                     reason = f"{name} analysis failed: {exc}"
-                    results[name] = fallback_builders[name](reason)
-                    analysis_provenance[name] = "fallback_error"
+                    if name in fallback_builders:
+                        results[name] = fallback_builders[name](reason)
+                        analysis_provenance[name] = "fallback_error"
+                    else:
+                        analysis_errors.append(reason)
+                        analysis_provenance[name] = "failed"
+                        failed_analyses.add(name)
                     analysis_notes[name] = [reason]
 
             if timed_out:
                 for future, name in list(pending.items()):
                     future.cancel()
-                    reason = f"{name} analysis timed out after {config.ANALYSIS_TIMEOUT_SECONDS} seconds."
-                    results[name] = fallback_builders[name](reason)
-                    analysis_provenance[name] = "fallback_timeout"
+                    reason = f"{name} analysis timed out after {timeout_seconds} seconds."
+                    if name in fallback_builders:
+                        results[name] = fallback_builders[name](reason)
+                        analysis_provenance[name] = "fallback_timeout"
+                    else:
+                        analysis_errors.append(reason)
+                        analysis_provenance[name] = "failed"
+                        failed_analyses.add(name)
                     analysis_notes[name] = [reason]
                     pending.pop(future)
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
     for name in ["sentiment", "hedging", "topics", "risk_vocab", "evasions"]:
+        if name in failed_analyses:
+            continue
         if name not in results:
             reason = f"{name} analysis did not return a result."
-            results[name] = fallback_builders[name](reason)
-            analysis_provenance[name] = "fallback_missing"
+            if name in fallback_builders:
+                results[name] = fallback_builders[name](reason)
+                analysis_provenance[name] = "fallback_missing"
+            else:
+                analysis_errors.append(reason)
+                analysis_provenance[name] = "failed"
+                failed_analyses.add(name)
             analysis_notes[name] = [reason]
+
+    if analysis_errors:
+        progress.empty()
+        st.error("Analysis failed; no fallback result was generated.")
+        for reason in analysis_errors:
+            st.write(f"- {reason}")
+        st.stop()
 
     if "risk_vocab" not in analysis_notes:
         analysis_notes["risk_vocab"] = []
@@ -591,16 +579,24 @@ def _render_results(brief):
                 st.caption(item.reasoning)
                 continue
             st.markdown(f"**{item.question_speaker}:** {item.question}")
-            st.markdown(f"> *{item.answer_speaker}: {item.answer}*")
+            if item.answer_turns:
+                for answer_turn in item.answer_turns:
+                    st.markdown(f"> **{answer_turn.speaker}:** *{answer_turn.text}*")
+            else:
+                st.markdown(f"> **{item.answer_speaker}:** *{item.answer}*")
             confidence_label = f"Pair confidence: {item.pair_confidence:.2f}"
             source_label = f"Source: {item.source}"
             if item.low_confidence:
-                st.caption(f"{confidence_label} | {source_label} | Low-confidence pair")
+                caption_parts = [confidence_label, "Low-confidence pair"]
             else:
-                st.caption(f"Responsiveness: {item.responsiveness}/10 | {confidence_label} | {source_label}")
+                caption_parts = [f"Responsiveness: {item.responsiveness}/10", confidence_label]
+            if st.session_state.get("show_debug", False):
+                caption_parts.append(source_label)
+            st.caption(" | ".join(caption_parts))
             st.write(item.reasoning)
             for note in item.notes:
-                st.caption(note)
+                if st.session_state.get("show_debug", False):
+                    st.caption(note)
             st.divider()
 
     with diagnostics_tab:

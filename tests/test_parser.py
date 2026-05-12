@@ -30,3 +30,33 @@ Enterprise demand remained solid and pricing was stable across geographies.
     assert parsed.parse_confidence > 0.6
     assert any(turn.role == "analyst" for turn in parsed.turns if turn.section == "qa")
     assert any(turn.role == "executive" for turn in parsed.turns if turn.section == "qa")
+
+
+def test_parser_detects_inline_ir_qa_transition_and_dash_colon_turns():
+    transcript_text = """
+Operator - Operator: Greetings, and welcome to the call.
+
+Jamie Lee - Chief Executive Officer: We delivered growth across products. Customers renewed at healthy rates.
+
+Pat Rivera - Chief Financial Officer: Revenue increased and margins expanded. With that, I will turn it back to investor relations.
+
+Morgan Chen - Vice President of Investor Relations: Thanks, Pat. We'll now move over to Q&A. Operator, can you please repeat your instructions?
+
+Operator - Operator: Our first question comes from Alex Brown with Morgan Stanley.
+
+Alex Brown - Morgan Stanley: Can you discuss enterprise demand and pricing?
+
+Jamie Lee - Chief Executive Officer: Enterprise demand remained solid and pricing was stable across geographies.
+
+Morgan Chen - Vice President of Investor Relations: That wraps up the Q&A portion of today's call.
+""".strip()
+
+    transcript_text = transcript_text + "\n" + ("Growth remained stable. " * 120)
+
+    parsed = parse_transcript(transcript_text, company="ACME", quarter="Q2 2025")
+
+    assert parsed.qa_boundary_detected is True
+    assert parsed.qa_text
+    assert any(turn.speaker == "Alex Brown" and turn.role == "analyst" for turn in parsed.turns)
+    assert any(turn.speaker == "Jamie Lee" and turn.role == "executive" and turn.section == "qa" for turn in parsed.turns)
+    assert any(turn.speaker == "Morgan Chen" and turn.role == "operator" for turn in parsed.turns)

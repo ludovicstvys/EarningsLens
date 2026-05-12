@@ -11,6 +11,8 @@ LOGGER = logging.getLogger(__name__)
 QA_BOUNDARY_PATTERNS = [
     re.compile(r"^\s*(questions?\s*(and|&)\s*answers?|q\s*&\s*a|q&a)\b.*$", re.IGNORECASE),
     re.compile(r"^\s*operator[:\s].*we will now (begin|open) the question", re.IGNORECASE),
+    re.compile(r"\bwe(?:['’]| wi)ll now move (?:over )?to q\s*&\s*a\b", re.IGNORECASE),
+    re.compile(r"\bwe (?:will|can) now (?:begin|open|take) (?:the )?(?:q\s*&\s*a|questions?)\b", re.IGNORECASE),
 ]
 COLON_ONLY_SPEAKER_RE = re.compile(r"^([A-Z][A-Za-z.\-\s']{1,60}):\s*$")
 INLINE_COLON_SPEAKER_RE = re.compile(r"^([A-Z][A-Za-z.\-\s']{1,60}):\s*(.+)$")
@@ -18,6 +20,7 @@ DASH_SPEAKER_RE = re.compile(r"^([A-Z][A-Za-z.\-\s']{1,60})\s*[—–-]\s*([^:]{
 TITLE_HINT_RE = re.compile(r"\b(ceo|cfo|chief|president|coo|chairman|chairwoman)\b", re.IGNORECASE)
 ANALYST_HINT_RE = re.compile(r"\b(analyst|research|securities|capital|partners|advisors|investments|jpmorgan|goldman|morgan stanley|barclays|ubs|bofa|citigroup|wells fargo)\b", re.IGNORECASE)
 MODERATOR_HINT_RE = re.compile(r"\b(operator|moderator|coordinator)\b", re.IGNORECASE)
+INVESTOR_RELATIONS_HINT_RE = re.compile(r"\b(investor relations|ir)\b", re.IGNORECASE)
 WORD_RE = re.compile(r"\b\w+\b")
 
 
@@ -40,7 +43,7 @@ def _normalize_text(text: str) -> str:
 def _find_qa_boundary(lines: list[str]) -> int | None:
     for idx, line in enumerate(lines):
         for pattern in QA_BOUNDARY_PATTERNS:
-            if pattern.match(line):
+            if pattern.search(line):
                 return idx
     return None
 
@@ -84,7 +87,12 @@ def _infer_role(
     speaker_lower = speaker.lower()
     title_lower = title.lower() if title else ""
 
-    if speaker_lower == "operator" or MODERATOR_HINT_RE.search(speaker_lower) or MODERATOR_HINT_RE.search(title_lower):
+    if (
+        speaker_lower == "operator"
+        or MODERATOR_HINT_RE.search(speaker_lower)
+        or MODERATOR_HINT_RE.search(title_lower)
+        or INVESTOR_RELATIONS_HINT_RE.search(title_lower)
+    ):
         return "operator", 1.0, ["Matched operator/moderator marker."]
     if speaker in prepared_execs:
         notes.append("Speaker appeared in prepared remarks with executive title.")

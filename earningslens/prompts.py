@@ -116,9 +116,10 @@ Write a brief that a portfolio manager could read in 30 seconds:
 
 Respond with ONLY this JSON — no markdown, no preamble:
 {{
-  "executive_summary": "<3 sentences, ≤ 70 words total. Lead with the signal. Be concrete, name specifics from the data above.>",
-  "bullet_points": ["<bullet 1, ≤ 20 words>", "<bullet 2>", "<bullet 3>", "<optional bullet 4>", "<optional bullet 5>"]
+  "executive_summary": "Write 1-3 factual sentences, 70 words maximum. Lead with the signal and cite specific metrics.",
+  "bullet_points": ["Write a factual bullet under 20 words.", "Write a second factual bullet.", "Write a third factual bullet."]
 }}
 
 Tone: dry, factual, no hype. If signal is green, say so plainly. Never give investment advice or price targets.
+Do not copy the JSON example text. Do not use angle brackets or placeholder labels.
 """
