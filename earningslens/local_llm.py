@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from threading import Lock
 from typing import Any
 
 import torch
@@ -9,6 +10,7 @@ import torch
 from earningslens import config
 
 LOGGER = logging.getLogger(__name__)
+_GENERATION_LOCK = Lock()
 
 
 def _device_config() -> tuple[str, torch.dtype]:
@@ -94,21 +96,22 @@ def _prepare_inputs(prompt_text: str, tokenizer: Any, device: str) -> dict[str, 
 
 
 def generate_text(prompt: str, max_new_tokens: int = 300) -> str:
-    tokenizer = _get_tokenizer()
-    model = _get_model()
-    device, _ = _device_config()
+    with _GENERATION_LOCK:
+        tokenizer = _get_tokenizer()
+        model = _get_model()
+        device, _ = _device_config()
 
-    prompt_text = _build_prompt(prompt)
-    inputs = _prepare_inputs(prompt_text, tokenizer, device)
+        prompt_text = _build_prompt(prompt)
+        inputs = _prepare_inputs(prompt_text, tokenizer, device)
 
-    with torch.no_grad():
-        generated = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+        with torch.no_grad():
+            generated = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
 
-    new_tokens = generated[0][inputs["input_ids"].shape[1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        new_tokens = generated[0][inputs["input_ids"].shape[1]:]
+        return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()

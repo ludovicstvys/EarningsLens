@@ -35,6 +35,13 @@ if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 SAMPLES = {
+    "Goldman Sachs Q4 2025→Q1 2026 (Real)": {
+        "company": "Goldman Sachs",
+        "current_quarter": "Q1 2026",
+        "prior_quarter": "Q4 2025",
+        "current_path": Path("data/samples/GS_Q1_2026.txt"),
+        "prior_path": Path("data/samples/GS_Q4_2025.txt"),
+    },
     "Microsoft Q4 2025→Q1 2026 (Real)": {
         "company": "Microsoft",
         "current_quarter": "Q1 2026",
@@ -84,14 +91,6 @@ def _render_sidebar_options() -> None:
     st.session_state["show_debug"] = st.sidebar.toggle(
         "Show diagnostics",
         value=bool(st.session_state.get("show_debug", False)),
-    )
-    st.session_state["analysis_timeout_seconds"] = st.sidebar.slider(
-        "Analysis timeout",
-        min_value=30,
-        max_value=300,
-        value=int(st.session_state.get("analysis_timeout_seconds", config.ANALYSIS_TIMEOUT_SECONDS)),
-        step=15,
-        help="Increase this on CPU-only machines so local Q&A scoring can finish.",
     )
 
 
@@ -317,7 +316,7 @@ def _run_analysis(input_payload: dict):
     analysis_provenance: dict[str, str] = {}
     analysis_errors: list[str] = []
     failed_analyses: set[str] = set()
-    timeout_seconds = int(st.session_state.get("analysis_timeout_seconds", config.ANALYSIS_TIMEOUT_SECONDS))
+    timeout_seconds = config.ANALYSIS_TIMEOUT_SECONDS
     fallback_builders = {
         "hedging": lambda reason: _fallback_hedging(reason),
         "topics": lambda reason: _fallback_topics(reason),

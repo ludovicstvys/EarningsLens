@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from earningslens.parser import parse_transcript
 
 
@@ -60,3 +62,17 @@ Morgan Chen - Vice President of Investor Relations: That wraps up the Q&A portio
     assert any(turn.speaker == "Alex Brown" and turn.role == "analyst" for turn in parsed.turns)
     assert any(turn.speaker == "Jamie Lee" and turn.role == "executive" and turn.section == "qa" for turn in parsed.turns)
     assert any(turn.speaker == "Morgan Chen" and turn.role == "operator" for turn in parsed.turns)
+
+
+def test_parser_detects_goldman_sample_qa_roster_transition():
+    parsed = parse_transcript(
+        Path("data/samples/GS_Q1_2026.txt").read_text(),
+        company="Goldman Sachs",
+        quarter="Q1 2026",
+        ticker="GS",
+    )
+
+    assert parsed.qa_boundary_detected is True
+    assert parsed.parse_confidence > 0.9
+    assert any(turn.speaker == "Glenn Schorr" and turn.role == "analyst" for turn in parsed.turns if turn.section == "qa")
+    assert any(turn.speaker == "Denis Coleman" and turn.role == "executive" for turn in parsed.turns if turn.section == "qa")

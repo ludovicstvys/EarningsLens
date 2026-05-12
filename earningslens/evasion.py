@@ -326,13 +326,16 @@ def _score_single_pair(question: SpeakerTurn, answer_turns: list[SpeakerTurn]) -
     )
     retry_suffix = (
         "\n\nIMPORTANT: Respond with a single valid JSON object only. "
-        'Do not include commentary, markdown, or code fences.'
+        'Do not include commentary, markdown, code fences, or copied transcript text. '
+        'Example: {"responsiveness": 7, "reasoning": "The answer addressed the topic but lacked some detail."}'
     )
     last_error: Exception | None = None
     for attempt in range(2):
         response = generate_text(prompt if attempt == 0 else prompt + retry_suffix, max_new_tokens=120)
         try:
             payload = _extract_json(response)
+            if "responsiveness" not in payload:
+                raise ValueError("Local model JSON did not include a responsiveness score.")
             responsiveness = int(payload.get("responsiveness", 0))
             reasoning = str(payload.get("reasoning", "")).strip() or "Fallback score from single-pair pass."
             return max(0, min(10, responsiveness)), reasoning
@@ -343,85 +346,7 @@ def _score_single_pair(question: SpeakerTurn, answer_turns: list[SpeakerTurn]) -
     return _heuristic_score_single_pair(question.text, answer)
 
 
-def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]]) -> list[EvasionScore]:
-    prompt_items = []
-    scored_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
-    skipped_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
-    for question, answer_turns, pair_confidence, notes in pairs:
-        if pair_confidence < config.MIN_QA_PAIR_CONFIDENCE:
-            skipped_pairs.append((question, answer_turns, pair_confidence, notes))
-            continue
-        pair_id = len(scored_pairs)
-        scored_pairs.append((question, answer_turns, pair_confidence, notes))
-        prompt_items.append(
-            {
-                "pair_id": pair_id,
-                "question_speaker": question.speaker,
-                "question": _truncate_for_prompt(question.text),
-                "answer_speaker": ", ".join(dict.fromkeys(turn.speaker for turn in answer_turns)),
-                "answer": _truncate_for_prompt(" ".join(turn.text for turn in answer_turns), 180),
-            }
-        )
-
-    if not scored_pairs:
-        return [
-            _build_evasion_score(
-                question,
-                answer_turns,
-                responsiveness=10,
-                reasoning="Skipped scoring because speaker parsing confidence was too low.",
-                pair_confidence=pair_confidence,
-                low_confidence=True,
-                source="skipped_low_confidence",
-                notes=notes,
-            )
-            for question, answer_turns, pair_confidence, notes in skipped_pairs
-        ]
-
-    prompt = prompts.EVASION_BATCH_SCORING_PROMPT.format(qa_pairs_json=json.dumps(prompt_items, ensure_ascii=True))
-    retry_suffix = (
-        "\n\nIMPORTANT: Respond with a single valid JSON object only. "
-        'Do not include commentary, markdown, or code fences.'
-    )
-    payload = None
-    last_error: Exception | None = None
-    for attempt in range(2):
-        response = generate_text(
-            prompt if attempt == 0 else prompt + retry_suffix,
-            max_new_tokens=min(360, 80 + len(prompt_items) * 45),
-        )
-        try:
-            payload = _extract_json(response)
-            break
-        except (json.JSONDecodeError, ValueError) as exc:
-            last_error = exc
-            LOGGER.warning("Batch evasion parse failed on attempt %s: %s. Raw response: %r", attempt + 1, exc, response[:400])
-    if payload is None:
-        LOGGER.warning("Falling back to single-pair evasion scoring for all pairs after batch parse failures: %s", last_error)
-        return [
-            _build_evasion_score(
-                question,
-                answer_turns,
-                *_score_single_pair(question, answer_turns),
-                pair_confidence=pair_confidence,
-                source="single_pair_fallback",
-                notes=notes,
-            )
-            for question, answer_turns, pair_confidence, notes in scored_pairs
-        ] + [
-            _build_evasion_score(
-                question,
-                answer_turns,
-                responsiveness=10,
-                reasoning="Skipped scoring because speaker parsing confidence was too low.",
-                pair_confidence=pair_confidence,
-                low_confidence=True,
-                source="skipped_low_confidence",
-                notes=notes,
-            )
-            for question, answer_turns, pair_confidence, notes in skipped_pairs
-        ]
-
+def _parse_batch_scores(payload: dict, expected_count: int) -> tuple[dict[int, tuple[int, str]], list[int]]:
     raw_scores = payload.get("scores", [])
     score_by_pair_id: dict[int, tuple[int, str]] = {}
     if isinstance(raw_scores, list):
@@ -432,6 +357,8 @@ def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[s
                 pair_id = int(item.get("pair_id"))
             except (TypeError, ValueError):
                 continue
+            if pair_id < 0 or pair_id >= expected_count:
+                continue
             try:
                 responsiveness = int(item.get("responsiveness", 0))
             except (TypeError, ValueError):
@@ -439,7 +366,70 @@ def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[s
             reasoning = str(item.get("reasoning", "")).strip()
             score_by_pair_id[pair_id] = (max(0, min(10, responsiveness)), reasoning)
 
-    missing_pair_ids = [pair_id for pair_id in range(len(scored_pairs)) if pair_id not in score_by_pair_id]
+    missing_pair_ids = [pair_id for pair_id in range(expected_count) if pair_id not in score_by_pair_id]
+    return score_by_pair_id, missing_pair_ids
+
+
+def _chunked(items: list, chunk_size: int) -> list[list]:
+    safe_chunk_size = max(1, chunk_size)
+    return [items[idx : idx + safe_chunk_size] for idx in range(0, len(items), safe_chunk_size)]
+
+
+def _score_scored_pairs_batch(scored_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]]) -> list[EvasionScore]:
+    prompt_items = []
+    for pair_id, (question, answer_turns, _pair_confidence, _notes) in enumerate(scored_pairs):
+        prompt_items.append(
+            {
+                "pair_id": pair_id,
+                "question_speaker": question.speaker,
+                "question": _truncate_for_prompt(question.text),
+                "answer_speaker": ", ".join(dict.fromkeys(turn.speaker for turn in answer_turns)),
+                "answer": _truncate_for_prompt(" ".join(turn.text for turn in answer_turns), 180),
+            }
+        )
+
+    prompt = prompts.EVASION_BATCH_SCORING_PROMPT.format(qa_pairs_json=json.dumps(prompt_items, ensure_ascii=True))
+    retry_suffix = (
+        "\n\nIMPORTANT: Respond with a single valid JSON object only. "
+        "Include every pair_id from the Q&A PAIRS JSON exactly once. "
+        'Do not include commentary, markdown, code fences, or copied transcript text.'
+    )
+    payload = None
+    best_partial_payload = None
+    last_error: Exception | None = None
+    for attempt in range(2):
+        response = generate_text(
+            prompt if attempt == 0 else prompt + retry_suffix,
+            max_new_tokens=min(360, 80 + len(prompt_items) * 45),
+        )
+        try:
+            candidate_payload = _extract_json(response)
+            _score_by_pair_id, missing_pair_ids = _parse_batch_scores(candidate_payload, len(scored_pairs))
+            if missing_pair_ids:
+                best_partial_payload = candidate_payload
+                raise ValueError(f"Batch evasion scorer omitted pair_ids {missing_pair_ids}.")
+            payload = candidate_payload
+            break
+        except (json.JSONDecodeError, ValueError) as exc:
+            last_error = exc
+            LOGGER.warning("Batch evasion parse failed on attempt %s: %s. Raw response: %r", attempt + 1, exc, response[:400])
+    if payload is None and best_partial_payload is not None:
+        payload = best_partial_payload
+    if payload is None:
+        LOGGER.warning("Falling back to single-pair evasion scoring for batch after parse failures: %s", last_error)
+        return [
+            _build_evasion_score(
+                question,
+                answer_turns,
+                *_score_single_pair(question, answer_turns),
+                pair_confidence=pair_confidence,
+                source="single_pair_fallback",
+                notes=notes,
+            )
+            for question, answer_turns, pair_confidence, notes in scored_pairs
+        ]
+
+    score_by_pair_id, missing_pair_ids = _parse_batch_scores(payload, len(scored_pairs))
     if missing_pair_ids:
         LOGGER.warning("Batch evasion scorer omitted pair_ids %s; rescoring individually.", missing_pair_ids)
         for pair_id in missing_pair_ids:
@@ -461,6 +451,36 @@ def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[s
                 notes=notes,
             )
         )
+    return results
+
+
+def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]]) -> list[EvasionScore]:
+    scored_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
+    skipped_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
+    for question, answer_turns, pair_confidence, notes in pairs:
+        if pair_confidence < config.MIN_QA_PAIR_CONFIDENCE:
+            skipped_pairs.append((question, answer_turns, pair_confidence, notes))
+            continue
+        scored_pairs.append((question, answer_turns, pair_confidence, notes))
+
+    if not scored_pairs:
+        return [
+            _build_evasion_score(
+                question,
+                answer_turns,
+                responsiveness=10,
+                reasoning="Skipped scoring because speaker parsing confidence was too low.",
+                pair_confidence=pair_confidence,
+                low_confidence=True,
+                source="skipped_low_confidence",
+                notes=notes,
+            )
+            for question, answer_turns, pair_confidence, notes in skipped_pairs
+        ]
+
+    results: list[EvasionScore] = []
+    for chunk in _chunked(scored_pairs, config.EVASION_BATCH_SIZE):
+        results.extend(_score_scored_pairs_batch(chunk))
     results.extend(
         _build_evasion_score(
             question,
@@ -479,8 +499,6 @@ def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[s
 
 def analyze_evasion(transcript: Transcript, progress_callback=None) -> list[EvasionScore]:
     pairs = _extract_pairs(transcript)
-    if len(pairs) > config.MAX_QA_PAIRS:
-        pairs = sorted(pairs, key=lambda pair: len(pair[0].text.split()), reverse=True)[: config.MAX_QA_PAIRS]
 
     if not pairs:
         return []

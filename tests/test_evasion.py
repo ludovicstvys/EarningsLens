@@ -87,6 +87,99 @@ def test_evasion_uses_heuristic_instead_of_zero_when_single_pair_parse_fails(mon
     assert "Unable to parse" not in result[0].reasoning
 
 
+def test_evasion_retries_when_batch_omits_pair_ids(monkeypatch):
+    responses = iter(
+        [
+            '{"scores": [{"pair_id": 0, "responsiveness": 8, "reasoning": "Answered the first question."}]}',
+            (
+                '{"scores": ['
+                '{"pair_id": 0, "responsiveness": 8, "reasoning": "Answered the first question."},'
+                '{"pair_id": 1, "responsiveness": 6, "reasoning": "Partially answered the second question."}'
+                "]}"
+            ),
+        ]
+    )
+
+    monkeypatch.setattr("earningslens.evasion.generate_text", lambda prompt, max_new_tokens=300: next(responses))
+
+    transcript = Transcript(
+        company="ACME",
+        quarter="Q2 2025",
+        turns=[
+            SpeakerTurn(idx=0, speaker="Analyst One", role="analyst", role_confidence=0.9, section="qa", text="Can you quantify demand trends?"),
+            SpeakerTurn(idx=1, speaker="CEO", role="executive", role_confidence=0.95, section="qa", text="Demand grew 8% and backlog remained strong."),
+            SpeakerTurn(idx=2, speaker="Analyst Two", role="analyst", role_confidence=0.9, section="qa", text="How are margins changing by segment?"),
+            SpeakerTurn(idx=3, speaker="CFO", role="executive", role_confidence=0.95, section="qa", text="Margins improved overall, but mix varied across the portfolio."),
+        ],
+        raw_text="Q&A transcript",
+    )
+
+    result = analyze_evasion(transcript)
+
+    assert [item.source for item in result] == ["batch_llm", "batch_llm"]
+    assert [item.responsiveness for item in result] == [8, 6]
+
+
+def test_evasion_scores_all_pairs_in_chunks(monkeypatch):
+    monkeypatch.setattr("earningslens.config.EVASION_BATCH_SIZE", 2)
+    responses = iter(
+        [
+            (
+                '{"scores": ['
+                '{"pair_id": 0, "responsiveness": 8, "reasoning": "Answered the first question."},'
+                '{"pair_id": 1, "responsiveness": 8, "reasoning": "Answered the second question."}'
+                "]}"
+            ),
+            (
+                '{"scores": ['
+                '{"pair_id": 0, "responsiveness": 8, "reasoning": "Answered the third question."},'
+                '{"pair_id": 1, "responsiveness": 8, "reasoning": "Answered the fourth question."}'
+                "]}"
+            ),
+            '{"scores": [{"pair_id": 0, "responsiveness": 8, "reasoning": "Answered the fifth question."}]}',
+        ]
+    )
+    call_count = 0
+
+    def fake_generate_text(prompt: str, max_new_tokens: int = 300) -> str:
+        nonlocal call_count
+        call_count += 1
+        return next(responses)
+
+    monkeypatch.setattr("earningslens.evasion.generate_text", fake_generate_text)
+
+    turns = []
+    for idx in range(5):
+        turns.extend(
+            [
+                SpeakerTurn(
+                    idx=idx * 2,
+                    speaker=f"Analyst {idx}",
+                    role="analyst",
+                    role_confidence=0.9,
+                    section="qa",
+                    text=f"How are you addressing demand area {idx} and margin area {idx} this quarter?",
+                ),
+                SpeakerTurn(
+                    idx=idx * 2 + 1,
+                    speaker="CEO",
+                    role="executive",
+                    role_confidence=0.95,
+                    section="qa",
+                    text=f"We addressed demand area {idx} with capacity actions and margin area {idx} with pricing discipline across the quarter.",
+                ),
+            ]
+        )
+
+    transcript = Transcript(company="ACME", quarter="Q2 2025", turns=turns, raw_text="Q&A transcript")
+
+    result = analyze_evasion(transcript)
+
+    assert len(result) == 5
+    assert call_count == 3
+    assert [item.source for item in result] == ["batch_llm"] * 5
+
+
 def test_evasion_replaces_echoed_reasoning_and_caps_partial_quant_answers(monkeypatch):
     monkeypatch.setattr(
         "earningslens.evasion.generate_text",

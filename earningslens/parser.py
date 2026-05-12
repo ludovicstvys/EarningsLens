@@ -13,6 +13,8 @@ QA_BOUNDARY_PATTERNS = [
     re.compile(r"^\s*operator[:\s].*we will now (begin|open) the question", re.IGNORECASE),
     re.compile(r"\bwe(?:['’]| wi)ll now move (?:over )?to q\s*&\s*a\b", re.IGNORECASE),
     re.compile(r"\bwe (?:will|can) now (?:begin|open|take) (?:the )?(?:q\s*&\s*a|questions?)\b", re.IGNORECASE),
+    re.compile(r"\bwe (?:will )?now take a moment to compile the q\s*&\s*a roster\b", re.IGNORECASE),
+    re.compile(r"\bwe(?:['’]ll| will) take our first question\b", re.IGNORECASE),
 ]
 COLON_ONLY_SPEAKER_RE = re.compile(r"^([A-Z][A-Za-z.\-\s']{1,60}):\s*$")
 INLINE_COLON_SPEAKER_RE = re.compile(r"^([A-Z][A-Za-z.\-\s']{1,60}):\s*(.+)$")

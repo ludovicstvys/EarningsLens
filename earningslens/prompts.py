@@ -57,8 +57,8 @@ Score the answer's responsiveness on a 0–10 scale:
 Penalize: declining to quantify when a quantitative answer was asked; pivoting to unrelated good news; "we don't comment on..." when context suggests they could.
 Do not penalize: legitimate "we'll address in next quarter's guidance" if the question genuinely asked about future guidance.
 
-Respond with ONLY this JSON — no markdown, no preamble:
-{{"responsiveness": <int 0-10>, "reasoning": "<one sentence, ≤ 25 words>"}}
+Respond with ONLY a valid JSON object using this shape. Use an integer score and one short sentence:
+{{"responsiveness": 7, "reasoning": "The answer addressed the topic but did not provide all requested detail."}}
 """
 
 EVASION_BATCH_SCORING_PROMPT = """You are scoring whether executives' answers actually addressed analysts' questions on an earnings call.
@@ -75,10 +75,10 @@ Do not penalize: legitimate "we'll address in next quarter's guidance" if the qu
 Q&A PAIRS JSON:
 {qa_pairs_json}
 
-Respond with ONLY this JSON — no markdown, no preamble:
+Respond with ONLY a valid JSON object. Include exactly one score object for every pair_id in the input:
 {{
   "scores": [
-    {{"pair_id": 0, "responsiveness": <int 0-10>, "reasoning": "<one sentence, ≤ 25 words>"}}
+    {{"pair_id": 0, "responsiveness": 7, "reasoning": "The answer addressed the topic but did not provide all requested detail."}}
   ]
 }}
 """
