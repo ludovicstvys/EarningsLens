@@ -267,15 +267,15 @@ def pipeline_diagram(styles):
 def env_table():
     hdr = ParagraphStyle("eh", fontName="Helvetica-Bold", fontSize=10,
                          leading=12, textColor=colors.white)
-    key = ParagraphStyle("ek", fontName="Courier-Bold", fontSize=9.5,
-                         leading=12, textColor=NAVY)
-    body = ParagraphStyle("eb", fontName="Helvetica", fontSize=9.5,
-                          leading=13, textColor=colors.HexColor("#1A1A1A"))
-    req = ParagraphStyle("er", fontName="Helvetica-Bold", fontSize=9,
-                         leading=12, textColor=colors.white, alignment=TA_CENTER)
+    key = ParagraphStyle("ek", fontName="Courier-Bold", fontSize=8.5,
+                         leading=11, textColor=NAVY)
+    body = ParagraphStyle("eb", fontName="Helvetica", fontSize=9,
+                          leading=12, textColor=colors.HexColor("#1A1A1A"))
+    req = ParagraphStyle("er", fontName="Helvetica-Bold", fontSize=8,
+                         leading=11, textColor=colors.white, alignment=TA_CENTER)
 
     def chip(text, color):
-        return Table([[Paragraph(text, req)]], colWidths=[2.0 * cm], rowHeights=[0.55 * cm],
+        return Table([[Paragraph(text, req)]], colWidths=[1.8 * cm], rowHeights=[0.5 * cm],
                      style=TableStyle([
                          ("BACKGROUND", (0, 0), (-1, -1), color),
                          ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -287,26 +287,34 @@ def env_table():
                      ]))
 
     rows = [
-        [Paragraph("Variable", hdr), Paragraph("Required?", hdr),
-         Paragraph("What it does", hdr), Paragraph("Default / example", hdr)],
-        [Paragraph("MODEL", key), chip("Optional", SOFT),
+        [Paragraph("Variable", hdr), Paragraph("Req?", hdr),
+         Paragraph("What it does", hdr), Paragraph("Default", hdr)],
+        [Paragraph("MODEL", key), chip("Opt", SOFT),
          Paragraph("Hugging Face model id for the local instruct LLM used by "
                    "topic extraction, Q&amp;A evasion scoring, and brief synthesis.", body),
-         Paragraph("HuggingFaceTB/<br/>SmolLM2-1.7B-Instruct", body)],
-        [Paragraph("ALPHA_VANTAGE_API_KEY", key), chip("If using search", ACCENT),
+         Paragraph("SmolLM2-1.7B-<br/>Instruct", body)],
+        [Paragraph("ALPHA_VANTAGE_<br/>API_KEY", key), chip("If search", ACCENT),
          Paragraph("Free Alpha Vantage key used by <b>Search company</b> mode to fetch "
                    "real ticker transcripts. Not needed for <b>Use sample</b> mode.", body),
-         Paragraph("e.g. <i>ABCD1234EFGH5678</i>", body)],
+         Paragraph("—", body)],
+        [Paragraph("EVASION_<br/>BATCH_SIZE", key), chip("Opt", SOFT),
+         Paragraph("Number of Q&amp;A pairs to score in parallel when evaluating evasion. "
+                   "Reduce if memory-constrained.", body),
+         Paragraph("6", body)],
+        [Paragraph("ANALYSIS_<br/>TIMEOUT_SECONDS", key), chip("Opt", SOFT),
+         Paragraph("Maximum seconds per analysis before falling back to a simpler method. "
+                   "Set via <b>.env</b>, not sidebar.", body),
+         Paragraph("300", body)],
     ]
-    t = Table(rows, colWidths=[4.2 * cm, 2.4 * cm, 6.4 * cm, 3.0 * cm], repeatRows=1)
+    t = Table(rows, colWidths=[3.2 * cm, 1.8 * cm, 5.8 * cm, 2.2 * cm], repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BG]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
         ("BOX", (0, 0), (-1, -1), 0.4, RULE),
         ("LINEBELOW", (0, 0), (-1, 0), 0.6, NAVY),
         ("INNERGRID", (0, 1), (-1, -1), 0.3, RULE),
@@ -476,15 +484,16 @@ def build():
         "and pick the two you want to compare. Transcripts are fetched via Alpha Vantage.",
         styles))
     story.append(bullet(
-        "<b>Use sample.</b> Run on the built-in synthetic demo pairs — perfect for trying the "
-        "tool offline or for grading.",
+        "<b>Use sample.</b> Run on built-in demo pairs — Microsoft and Goldman Sachs Q-over-Q comparisons. "
+        "Perfect for trying the tool offline or for grading without API calls.",
         styles))
 
     story.append(Paragraph("Sidebar controls", styles["ELH2"]))
-    story.append(bullet("<b>Thresholds</b> for sentiment gap, hedging spike, and topic drift — adjust to your tolerance.", styles))
-    story.append(bullet("<b>Q&amp;A confidence filter</b> — drops low-confidence parsed Q&amp;A pairs so the evasion tab stays clean.", styles))
-    story.append(bullet("<b>Per-analysis timeout</b> — caps how long any single analyser can run before falling back.", styles))
-    story.append(bullet("<b>Show diagnostics</b> — surfaces parsed speaker roles, turn segmentation, and analysis provenance.", styles))
+    story.append(bullet("<b>Mode</b> — choose <b>Search company</b> to fetch real transcripts by ticker, or <b>Use sample</b> for built-in demo pairs.", styles))
+    story.append(bullet("<b>Input selection</b> — use sidebar dropdowns to pick or search companies and compare quarters.", styles))
+    story.append(bullet("<b>Show diagnostics</b> — toggle to surface parsed speaker roles, turn segmentation, evasion confidence scores, and analysis provenance.", styles))
+    story.append(bullet("<b>Configuration</b> — thresholds and timeouts are set in <b>.env</b>, not the sidebar. Adjust "
+                   "<b>ANALYSIS_TIMEOUT_SECONDS</b> or <b>EVASION_BATCH_SIZE</b> if needed.", styles))
 
     story.append(Paragraph("The five analyses", styles["ELH2"]))
     story.append(tab_table())
@@ -535,17 +544,19 @@ def build():
         "the cache and are much faster.",
         styles["ELBody"]))
 
-    story.append(Paragraph("An analysis shows a “fallback” badge", styles["ELH3"]))
+    story.append(Paragraph(“An analysis shows a \”fallback\” badge”, styles[“ELH3”]))
     story.append(Paragraph(
-        "The main model path exceeded the per-analysis timeout or raised an error, so a simpler "
-        "fallback path was used. The headline signal still works; treat the fallback section as "
-        "lower-confidence and consider raising the timeout in the sidebar.",
-        styles["ELBody"]))
+        “The main model path exceeded the per-analysis timeout or raised an error, so a simpler “
+        “fallback path was used. The headline signal still works; treat the fallback section as “
+        “lower-confidence. To increase the timeout, set <b>ANALYSIS_TIMEOUT_SECONDS</b> in <b>.env</b> “
+        “(default 300) and restart the app.”,
+        styles[“ELBody”]))
 
     story.append(Paragraph("Q&amp;A pairs look mismatched", styles["ELH3"]))
     story.append(Paragraph(
-        "Turn the Q&amp;A confidence filter up. Low-confidence pairs are usually moderator "
-        "interjections or paste artefacts in the source transcript.",
+        "Low-confidence pairs — moderator interjections, paste artefacts, or speaker role ambiguity — "
+        "are automatically downweighted in the evasion scoring (minimum confidence threshold 0.55). "
+        "Enable <b>Show diagnostics</b> to inspect pair confidence scores.",
         styles["ELBody"]))
 
     story.append(Paragraph("Alpha Vantage rate limits", styles["ELH3"]))
