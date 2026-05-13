@@ -51,9 +51,30 @@ SAMPLES = {
 }
 
 SIGNAL_COPY = {
-    "green": ("🟢", "GREEN — Quarter looks clean", "#d8f3dc", "#1b4332"),
-    "amber": ("🟡", "AMBER — Watch list", "#fff3bf", "#8d6e00"),
-    "red": ("🔴", "RED — Multiple stress signals", "#ffe3e3", "#9b2226"),
+    "green": {
+        "emoji": "🟢",
+        "label": "GREEN — Quarter looks clean",
+        "bg": "#d8f3dc",
+        "bg2": "#b7e4c7",
+        "fg": "#1b4332",
+        "accent": "#1b998b",
+    },
+    "amber": {
+        "emoji": "🟡",
+        "label": "AMBER — Watch list",
+        "bg": "#fff3bf",
+        "bg2": "#ffe066",
+        "fg": "#8d6e00",
+        "accent": "#e0a458",
+    },
+    "red": {
+        "emoji": "🔴",
+        "label": "RED — Multiple stress signals",
+        "bg": "#ffe3e3",
+        "bg2": "#ffc9c9",
+        "fg": "#9b2226",
+        "accent": "#c8553d",
+    },
 }
 
 @st.cache_data(show_spinner=False)
@@ -467,26 +488,201 @@ def _run_analysis(input_payload: dict):
 
 
 def _render_results(brief):
-    emoji, label, bg, fg = SIGNAL_COPY[brief.overall_signal]
-    hero_left, hero_right = st.columns([1, 2])
-    with hero_left:
+    signal = SIGNAL_COPY[brief.overall_signal]
+    flagged_evasion_count = sum(1 for item in brief.evasions if item.flagged)
+    total_evasion_pairs = len(brief.evasions)
+
+    period_label = f"{brief.prior_quarter} → {brief.quarter}"
+
+    # Hero — full-width signal banner
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, {signal['bg']} 0%, {signal['bg2']} 100%);
+            color: {signal['fg']};
+            padding: 1.4rem 1.6rem;
+            border-radius: 18px;
+            border-left: 6px solid {signal['accent']};
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            margin-bottom: 1rem;
+        ">
+            <div style="display:flex;align-items:center;gap:1.1rem;flex-wrap:wrap;">
+                <div style="font-size:3rem;line-height:1;">{signal['emoji']}</div>
+                <div style="flex:1;min-width:240px;">
+                    <div style="font-size:0.72rem;opacity:0.75;letter-spacing:0.12em;text-transform:uppercase;">
+                        {brief.company} &middot; {period_label}
+                    </div>
+                    <div style="font-size:1.55rem;font-weight:700;line-height:1.15;margin-top:0.25rem;">
+                        {signal['label']}
+                    </div>
+                    <div style="font-size:0.92rem;opacity:0.85;margin-top:0.3rem;">
+                        {brief.flag_count} flagged dimension{'s' if brief.flag_count != 1 else ''}
+                        &nbsp;&middot;&nbsp;
+                        {total_evasion_pairs} Q&amp;A pair{'s' if total_evasion_pairs != 1 else ''} reviewed
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Executive summary card
+    st.markdown(
+        f"""
+        <div style="
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-left: 4px solid {signal['accent']};
+            border-radius: 12px;
+            padding: 1.1rem 1.3rem;
+            margin-bottom: 0.7rem;
+        ">
+            <div style="font-size:0.72rem;color:#6c757d;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.45rem;">
+                Executive summary
+            </div>
+            <div style="font-size:1.02rem;line-height:1.55;color:#1a1a1a;">
+                {brief.executive_summary}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Key takeaways
+    if brief.bullet_points:
+        bullets_html = "".join(
+            f"<li style='margin-bottom:0.35rem;'>{bullet}</li>" for bullet in brief.bullet_points
+        )
         st.markdown(
             f"""
-            <div style="background:{bg};color:{fg};padding:1.25rem;border-radius:18px;text-align:center;">
-                <div style="font-size:3rem;">{emoji}</div>
-                <div style="font-weight:700;">{label}</div>
-                <div style="margin-top:0.35rem;">{brief.flag_count} flagged dimensions</div>
+            <div style="
+                background: #fbfbfd;
+                border: 1px solid #e9ecef;
+                border-radius: 12px;
+                padding: 1.1rem 1.3rem;
+                margin-bottom: 0.9rem;
+            ">
+                <div style="font-size:0.72rem;color:#6c757d;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:0.55rem;">
+                    Key takeaways
+                </div>
+                <ul style="margin:0;padding-left:1.15rem;line-height:1.55;color:#1a1a1a;">
+                    {bullets_html}
+                </ul>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with hero_right:
-        st.markdown(f"> {brief.executive_summary}")
-        for bullet in brief.bullet_points:
-            st.write(f"- {bullet}")
-        provenance_line = ", ".join(f"{name}: `{source}`" for name, source in brief.analysis_provenance.items())
-        if provenance_line:
-            st.caption(f"Analysis provenance: {provenance_line}")
+
+    # KPI strip — four headline metrics with flagged accent
+    sentiment_flagged = brief.sentiment.flagged
+    hedging_flagged = brief.hedging.flagged
+    topics_flagged = brief.topics.flagged
+    evasion_flagged = flagged_evasion_count > 0
+
+    kpis = [
+        {
+            "label": "Sentiment gap",
+            "value": f"{brief.sentiment.gap:+.2f}",
+            "sub": "Q&A vs prepared",
+            "flagged": sentiment_flagged,
+        },
+        {
+            "label": "Hedging Δ",
+            "value": _format_delta_pct(brief.hedging.delta_pct),
+            "sub": "quarter-over-quarter",
+            "flagged": hedging_flagged,
+        },
+        {
+            "label": "Topic similarity",
+            "value": f"{brief.topics.semantic_similarity:.2f}",
+            "sub": "semantic vs prior",
+            "flagged": topics_flagged,
+        },
+        {
+            "label": "Q&A flags",
+            "value": f"{flagged_evasion_count} / {total_evasion_pairs}",
+            "sub": "low-responsiveness pairs",
+            "flagged": evasion_flagged,
+        },
+    ]
+
+    kpi_cols = st.columns(4)
+    for col, kpi in zip(kpi_cols, kpis):
+        accent = signal["accent"] if kpi["flagged"] else "#dee2e6"
+        value_color = signal["accent"] if kpi["flagged"] else "#0B2545"
+        col.markdown(
+            f"""
+            <div style="
+                background:#ffffff;
+                border:1px solid #e9ecef;
+                border-top:3px solid {accent};
+                border-radius:12px;
+                padding:0.9rem 0.9rem 0.95rem;
+                text-align:center;
+                height:100%;
+            ">
+                <div style="font-size:0.66rem;color:#6c757d;letter-spacing:0.1em;text-transform:uppercase;">
+                    {kpi['label']}
+                </div>
+                <div style="font-size:1.5rem;font-weight:700;color:{value_color};margin-top:0.25rem;line-height:1.1;">
+                    {kpi['value']}
+                </div>
+                <div style="font-size:0.74rem;color:#6c757d;margin-top:0.2rem;">
+                    {kpi['sub']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Flagged-dimensions chip row
+    chip_states = [
+        ("Sentiment", sentiment_flagged),
+        ("Hedging", hedging_flagged),
+        ("Topics", topics_flagged),
+        ("Q&A", evasion_flagged),
+    ]
+    chips_html = "".join(
+        f"""<span style="
+            display:inline-block;
+            padding:0.32rem 0.85rem;
+            border-radius:999px;
+            font-size:0.82rem;
+            font-weight:600;
+            margin:0.15rem 0.3rem 0.15rem 0;
+            background:{'#ffe3e3' if flagged else '#e9f7ef'};
+            color:{'#9b2226' if flagged else '#1b4332'};
+            border:1px solid {'#f1aeae' if flagged else '#b7e4c7'};
+        ">{'⚑' if flagged else '✓'}&nbsp;{name}</span>"""
+        for name, flagged in chip_states
+    )
+    st.markdown(
+        f"""
+        <div style="margin:0.5rem 0 1.1rem;">
+            <span style="font-size:0.72rem;color:#6c757d;letter-spacing:0.1em;text-transform:uppercase;margin-right:0.6rem;">
+                Dimensions
+            </span>
+            {chips_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Provenance — small inline caption so reviewers know which path produced each section
+    provenance_items = list(brief.analysis_provenance.items())
+    if provenance_items:
+        chips = " &nbsp;·&nbsp; ".join(
+            f"<span style='color:#0B2545;font-weight:600;'>{name}</span> "
+            f"<code style='background:#f1f3f5;padding:1px 6px;border-radius:6px;font-size:0.78rem;'>{source}</code>"
+            for name, source in provenance_items
+        )
+        st.markdown(
+            f"<div style='font-size:0.78rem;color:#6c757d;margin-bottom:0.9rem;'>"
+            f"<span style='letter-spacing:0.1em;text-transform:uppercase;font-size:0.68rem;'>Provenance</span>"
+            f" &nbsp; {chips}</div>",
+            unsafe_allow_html=True,
+        )
 
     sentiment_tab, hedging_tab, topics_tab, risk_tab, diagnostics_tab = st.tabs(
         ["Sentiment", "Hedging", "Topics", "Risk vocab", "Diagnostics"]
