@@ -23,7 +23,16 @@ Recent reliability improvements:
 - diagnostics and provenance in the Streamlit UI
 - regression tests plus a local health-check script
 
-## Setup
+## One-click setup
+
+If you do not want to touch a terminal:
+
+- **macOS** — double-click `setup.command` in Finder.
+- **Windows** — double-click `setup.bat` in File Explorer.
+
+The installer verifies Python 3.11, creates `.venv`, installs every pinned dependency, copies `.env.example` to `.env`, and pre-downloads the three Hugging Face models (~1.5 GB). If Python 3.11 is missing it stops with a link to python.org — everything else is automated. After it finishes, double-click `launch.command` (macOS) or `launch.bat` (Windows) to start the app.
+
+## Manual setup
 
 ```bash
 # 1. Clone & enter

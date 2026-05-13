@@ -505,24 +505,45 @@ def build():
         "you can still use <b>Use sample</b> mode — only ticker search needs the key.",
         styles["ELCallout"]))
 
-    story.append(Paragraph("3. Install and run", styles["ELH2"]))
+    story.append(Paragraph("3. Install (one-click)", styles["ELH2"]))
+    story.append(Paragraph(
+        "The fastest path for a graded reviewer is the one-click installer:",
+        styles["ELBody"]))
+    story.append(bullet(
+        "<b>macOS</b> — double-click <b>setup.command</b> in Finder.",
+        styles))
+    story.append(bullet(
+        "<b>Windows</b> — double-click <b>setup.bat</b> in File Explorer.",
+        styles))
+    story.append(Paragraph(
+        "Both scripts (1) verify that Python 3.11 is present, (2) create the local <b>.venv</b>, "
+        "(3) install every pinned dependency from <b>requirements.txt</b>, (4) copy "
+        "<b>.env.example</b> to <b>.env</b>, and (5) pre-download the three Hugging Face models "
+        "(~1.5 GB total) into the on-disk cache. If Python 3.11 is missing, the script stops "
+        "and tells you exactly where to download it from <i>python.org</i> — every other step "
+        "is automated. Re-running the script is safe; existing components are reused, not "
+        "reinstalled.",
+        styles["ELBody"]))
+
+    story.append(Paragraph("3b. Manual install (if you prefer)", styles["ELH2"]))
     story.append(Paragraph(
         "python3.11 -m venv .venv<br/>"
         "source .venv/bin/activate&nbsp;&nbsp;&nbsp;<i># Windows: .venv\\Scripts\\activate</i><br/>"
         "pip install -r requirements.txt<br/>"
         "cp .env.example .env<br/>"
-        "python scripts/make_samples.py<br/>"
+        "python scripts/prefetch_models.py<br/>"
         "streamlit run app.py",
         styles["ELCode"]))
+
+    story.append(Paragraph("4. Launching the app", styles["ELH2"]))
     story.append(Paragraph(
-        "You can also start the app without typing any commands: double-click "
+        "After setup, start the app without typing any commands: double-click "
         "<b>launch.command</b> from Finder on macOS, or <b>launch.bat</b> from File Explorer on "
         "Windows. Both scripts activate the local virtualenv, verify dependencies, and launch "
-        "Streamlit. The first launch downloads the three models — expect a few minutes — and "
-        "subsequent launches start in seconds thanks to the on-disk model cache.",
+        "Streamlit. Subsequent launches start in seconds thanks to the on-disk model cache.",
         styles["ELBody"]))
 
-    story.append(Paragraph("4. Optional health checks", styles["ELH2"]))
+    story.append(Paragraph("5. Optional health checks", styles["ELH2"]))
     story.append(Paragraph(
         "./.venv/bin/pytest -q<br/>"
         "./.venv/bin/python scripts/health_check.py",
@@ -606,6 +627,16 @@ def build():
     story.append(Paragraph(
         "That is expected — three models are being downloaded and cached. Subsequent runs reuse "
         "the cache and are much faster.",
+        styles["ELBody"]))
+
+    story.append(Paragraph("The .models folder is huge", styles["ELH3"]))
+    story.append(Paragraph(
+        "EarningsLens only uses the PyTorch weights of each model, but a fresh Hugging Face "
+        "download also ships ONNX, TensorFlow, Flax, OpenVINO and Rust variants we never load. "
+        "Run <b>python scripts/clean_model_cache.py</b> to delete those — typically reclaims "
+        "~12&nbsp;GB and leaves a ~1.3&nbsp;GB on-disk cache that the app still loads from "
+        "without issue. The updated <b>prefetch_models.py</b> avoids re-downloading the "
+        "unwanted variants on future installs.",
         styles["ELBody"]))
 
     story.append(Paragraph("A score shows a heuristic or extract badge", styles["ELH3"]))
