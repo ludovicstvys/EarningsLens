@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Empty, SimpleQueue
 
@@ -16,10 +16,9 @@ from earningslens import config
 from earningslens.evasion import analyze_evasion
 from earningslens.hedging import analyze_hedging
 from earningslens.local_llm import warmup_local_llm
-from earningslens.models import HedgingAnalysis, RiskVocabItem, TopicDrift
 from earningslens.parser import parse_transcript
 from earningslens.risk_vocab import analyze_risk_vocab
-from earningslens.sentiment import analyze_sentiment, warmup_sentiment_model
+from earningslens.sentiment import analyze_sentiment, release_sentiment_model, warmup_sentiment_model
 from earningslens.synthesizer import synthesize
 from earningslens.transcript_fetcher import (
     TranscriptFetchError,
@@ -28,7 +27,7 @@ from earningslens.transcript_fetcher import (
     list_recent_quarters,
     search_companies,
 )
-from earningslens.topics import analyze_topics, warmup_topic_models
+from earningslens.topics import analyze_topics, release_topic_models, warmup_topic_models
 
 LOGGER = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
@@ -92,35 +91,6 @@ def _render_sidebar_options() -> None:
         "Show diagnostics",
         value=bool(st.session_state.get("show_debug", False)),
     )
-
-
-def _fallback_hedging(reason: str) -> HedgingAnalysis:
-    return HedgingAnalysis(
-        current_density=0.0,
-        prior_density=0.0,
-        delta_pct=0.0,
-        flagged=False,
-        top_hedges=[],
-        source="fallback",
-        notes=[reason],
-    )
-
-
-def _fallback_topics(reason: str) -> TopicDrift:
-    return TopicDrift(
-        current_themes=[],
-        prior_themes=[],
-        new_themes=[],
-        dropped_themes=[],
-        semantic_similarity=1.0,
-        flagged=False,
-        source="fallback",
-        notes=[reason],
-    )
-
-
-def _fallback_risk_vocab() -> list[RiskVocabItem]:
-    return []
 
 
 def _load_inputs(mode: str):
@@ -297,13 +267,6 @@ def _run_analysis(input_payload: dict):
         ticker=input_payload.get("symbol"),
     )
 
-    progress.progress(15, text="Loading local models")
-    warmup_sentiment_model()
-    warmup_topic_models()
-    warmup_local_llm()
-
-    progress.progress(20, text="Running sentiment / hedging / topics / risk vocab / evasion in parallel")
-
     progress_updates: SimpleQueue[tuple[float, str]] = SimpleQueue()
 
     def evasion_progress(fraction: float, label: str):
@@ -316,100 +279,129 @@ def _run_analysis(input_payload: dict):
     analysis_provenance: dict[str, str] = {}
     analysis_errors: list[str] = []
     failed_analyses: set[str] = set()
-    timeout_seconds = config.ANALYSIS_TIMEOUT_SECONDS
-    fallback_builders = {
-        "hedging": lambda reason: _fallback_hedging(reason),
-        "topics": lambda reason: _fallback_topics(reason),
-        "risk_vocab": lambda reason: _fallback_risk_vocab(),
-    }
 
-    executor = ThreadPoolExecutor(max_workers=5)
-    started_at = time.monotonic()
-    try:
-        futures = {
-            "sentiment": executor.submit(analyze_sentiment, current),
-            "hedging": executor.submit(analyze_hedging, current, prior),
-            "topics": executor.submit(analyze_topics, current, prior),
-            "risk_vocab": executor.submit(analyze_risk_vocab, current, prior),
-            "evasions": executor.submit(analyze_evasion, current, evasion_progress),
-        }
-        pending = {future: name for name, future in futures.items()}
-        while pending:
-            done, _ = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
-            while True:
-                try:
-                    fraction, label = progress_updates.get_nowait()
-                except Empty:
-                    break
-                progress.progress(min(80, 20 + int(fraction * 50)), text=label)
+    def record_analysis_result(name: str, result: object) -> None:
+        results[name] = result
+        if name == "evasions":
+            sources = sorted({item.source for item in result if getattr(item, "source", "")})
+            analysis_provenance[name] = ", ".join(sources) if sources else "computed"
+            combined_notes: list[str] = []
+            for item in result:
+                combined_notes.extend(item.notes)
+            analysis_notes[name] = combined_notes
+        elif name == "risk_vocab":
+            analysis_provenance[name] = "normalized_lexicon"
+            analysis_notes[name] = []
+        else:
+            analysis_provenance[name] = getattr(result, "source", "computed")
+            analysis_notes[name] = list(getattr(result, "notes", []))
 
-            elapsed = time.monotonic() - started_at
-            timed_out = elapsed >= timeout_seconds
-            for future in done:
-                name = pending.pop(future)
-                try:
-                    result = future.result()
-                    results[name] = result
-                    if name == "evasions":
-                        sources = sorted({item.source for item in result if getattr(item, "source", "")})
-                        analysis_provenance[name] = ", ".join(sources) if sources else "computed"
-                        combined_notes: list[str] = []
-                        for item in result:
-                            combined_notes.extend(item.notes)
-                        analysis_notes[name] = combined_notes
-                    elif name == "risk_vocab":
-                        analysis_provenance[name] = "normalized_lexicon"
-                        analysis_notes[name] = []
-                    else:
-                        analysis_provenance[name] = getattr(result, "source", "computed")
-                        analysis_notes[name] = list(getattr(result, "notes", []))
-                except Exception as exc:
-                    LOGGER.exception("%s analysis failed", name)
-                    reason = f"{name} analysis failed: {exc}"
-                    if name in fallback_builders:
-                        results[name] = fallback_builders[name](reason)
-                        analysis_provenance[name] = "fallback_error"
-                    else:
-                        analysis_errors.append(reason)
-                        analysis_provenance[name] = "failed"
-                        failed_analyses.add(name)
-                    analysis_notes[name] = [reason]
+    def record_analysis_failure(name: str, exc: Exception) -> None:
+        LOGGER.exception("%s analysis failed", name)
+        reason = f"{name} analysis failed: {type(exc).__name__}: {exc}"
+        analysis_errors.append(reason)
+        analysis_provenance[name] = "failed"
+        failed_analyses.add(name)
+        analysis_notes[name] = [reason]
 
-            if timed_out:
-                for future, name in list(pending.items()):
-                    future.cancel()
-                    reason = f"{name} analysis timed out after {timeout_seconds} seconds."
-                    if name in fallback_builders:
-                        results[name] = fallback_builders[name](reason)
-                        analysis_provenance[name] = "fallback_timeout"
-                    else:
-                        analysis_errors.append(reason)
-                        analysis_provenance[name] = "failed"
-                        failed_analyses.add(name)
-                    analysis_notes[name] = [reason]
-                    pending.pop(future)
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    def release_completed_analysis(name: str) -> None:
+        if name == "sentiment":
+            release_sentiment_model()
+        elif name == "topics":
+            release_topic_models()
+
+    def run_one(name: str, label: str, progress_value: int, fn) -> None:
+        progress.progress(progress_value, text=label)
+        try:
+            record_analysis_result(name, fn())
+        except Exception as exc:
+            record_analysis_failure(name, exc)
+        finally:
+            release_completed_analysis(name)
+
+    if config.LOW_MEMORY_MODE:
+        progress.progress(15, text="Running low-memory analysis plan")
+
+        run_one("hedging", "Running hedging analysis", 22, lambda: analyze_hedging(current, prior))
+        run_one("risk_vocab", "Running risk vocabulary analysis", 28, lambda: analyze_risk_vocab(current, prior))
+
+        def run_sentiment_low_memory():
+            warmup_sentiment_model()
+            return analyze_sentiment(current)
+
+        run_one("sentiment", "Running sentiment model", 38, run_sentiment_low_memory)
+
+        def run_topics_low_memory():
+            warmup_topic_models()
+            return analyze_topics(current, prior)
+
+        run_one("topics", "Running topic analysis", 52, run_topics_low_memory)
+
+        def evasion_progress_low_memory(fraction: float, label: str):
+            progress.progress(min(80, 65 + int(fraction * 15)), text=label)
+
+        def run_evasion_low_memory():
+            warmup_local_llm()
+            return analyze_evasion(current, evasion_progress_low_memory)
+
+        run_one("evasions", "Running Q&A evasion analysis", 65, run_evasion_low_memory)
+    else:
+        progress.progress(15, text="Loading local models")
+        warmup_sentiment_model()
+        warmup_topic_models()
+        warmup_local_llm()
+
+        progress.progress(20, text="Running sentiment / hedging / topics / risk vocab / evasion in parallel")
+
+        executor = ThreadPoolExecutor(max_workers=5)
+        try:
+            futures = {
+                "sentiment": executor.submit(analyze_sentiment, current),
+                "hedging": executor.submit(analyze_hedging, current, prior),
+                "topics": executor.submit(analyze_topics, current, prior),
+                "risk_vocab": executor.submit(analyze_risk_vocab, current, prior),
+                "evasions": executor.submit(analyze_evasion, current, evasion_progress),
+            }
+            pending = {future: name for name, future in futures.items()}
+            while pending:
+                while True:
+                    try:
+                        fraction, label = progress_updates.get_nowait()
+                    except Empty:
+                        break
+                    progress.progress(min(80, 20 + int(fraction * 50)), text=label)
+
+                done = [future for future in pending if future.done()]
+                if not done:
+                    time.sleep(0.1)
+                    continue
+
+                for future in done:
+                    name = pending.pop(future)
+                    try:
+                        record_analysis_result(name, future.result())
+                    except Exception as exc:
+                        record_analysis_failure(name, exc)
+                    finally:
+                        release_completed_analysis(name)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     for name in ["sentiment", "hedging", "topics", "risk_vocab", "evasions"]:
         if name in failed_analyses:
             continue
         if name not in results:
             reason = f"{name} analysis did not return a result."
-            if name in fallback_builders:
-                results[name] = fallback_builders[name](reason)
-                analysis_provenance[name] = "fallback_missing"
-            else:
-                analysis_errors.append(reason)
-                analysis_provenance[name] = "failed"
-                failed_analyses.add(name)
+            analysis_errors.append(reason)
+            analysis_provenance[name] = "failed"
+            failed_analyses.add(name)
             analysis_notes[name] = [reason]
 
     if analysis_errors:
         progress.empty()
-        st.error("Analysis failed; no fallback result was generated.")
+        st.error("Analysis failed. See details below.")
         for reason in analysis_errors:
-            st.write(f"- {reason}")
+            st.code(reason, language="text")
         st.stop()
 
     if "risk_vocab" not in analysis_notes:
@@ -592,6 +584,10 @@ def _render_results(brief):
             if st.session_state.get("show_debug", False):
                 caption_parts.append(source_label)
             st.caption(" | ".join(caption_parts))
+            if item.coverage:
+                status_icon = {"answered": "[answered]", "partial": "[partial]", "missed": "[missed]"}
+                for coverage_item in item.coverage:
+                    st.caption(f"{status_icon.get(coverage_item.status, '[partial]')} {coverage_item.part}: {coverage_item.reasoning}")
             st.write(item.reasoning)
             for note in item.notes:
                 if st.session_state.get("show_debug", False):

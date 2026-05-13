@@ -147,15 +147,25 @@ def cover_page(canvas, doc):
     # Bottom block
     canvas.setStrokeColor(RULE)
     canvas.setLineWidth(0.8)
-    canvas.line(4.2 * cm, 4 * cm, width - 2 * cm, 4 * cm)
+    canvas.line(4.2 * cm, 5.0 * cm, width - 2 * cm, 5.0 * cm)
 
     canvas.setFillColor(NAVY)
     canvas.setFont("Helvetica-Bold", 10)
-    canvas.drawString(4.2 * cm, 3.4 * cm, "Version 1.0")
+    canvas.drawString(4.2 * cm, 4.4 * cm, "Version 1.1")
     canvas.setFillColor(MUTED)
     canvas.setFont("Helvetica", 10)
-    canvas.drawString(4.2 * cm, 2.9 * cm, "Document type: End-user guide")
-    canvas.drawString(4.2 * cm, 2.4 * cm, "Audience: Analysts, students, and reviewers")
+    canvas.drawString(4.2 * cm, 3.9 * cm, "Document type: End-user guide")
+    canvas.drawString(4.2 * cm, 3.4 * cm, "Audience: Analysts, students, and reviewers")
+
+    canvas.setFillColor(NAVY)
+    canvas.setFont("Helvetica-Bold", 10)
+    canvas.drawString(4.2 * cm, 2.5 * cm, "Team")
+    canvas.setFillColor(MUTED)
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(4.2 * cm, 2.0 * cm,
+                      "Augustin BAUDANT  •  Yuzhi LUO  •  Ludovic SAINT-YVES")
+    canvas.drawString(4.2 * cm, 1.5 * cm,
+                      "Octave SUPRANO  •  Jin Wei ZHENG YANG")
 
     canvas.restoreState()
 
@@ -298,13 +308,13 @@ def env_table():
                    "real ticker transcripts. Not needed for <b>Use sample</b> mode.", body),
          Paragraph("—", body)],
         [Paragraph("EVASION_<br/>BATCH_SIZE", key), chip("Opt", SOFT),
-         Paragraph("Number of Q&amp;A pairs to score in parallel when evaluating evasion. "
-                   "Reduce if memory-constrained.", body),
-         Paragraph("6", body)],
-        [Paragraph("ANALYSIS_<br/>TIMEOUT_SECONDS", key), chip("Opt", SOFT),
-         Paragraph("Maximum seconds per analysis before falling back to a simpler method. "
-                   "Set via <b>.env</b>, not sidebar.", body),
-         Paragraph("300", body)],
+         Paragraph("Number of Q&amp;A prompts batched into a single LLM forward pass when scoring "
+                   "evasion. Higher values are faster but use more memory; reduce on tight RAM.", body),
+         Paragraph("3", body)],
+        [Paragraph("LOW_MEMORY_<br/>MODE", key), chip("Opt", SOFT),
+         Paragraph("When enabled, runs the heaviest model-backed analyses in phases to reduce "
+                   "peak RAM. Set to 0 on larger machines for the faster parallel path.", body),
+         Paragraph("1", body)],
     ]
     t = Table(rows, colWidths=[3.2 * cm, 1.8 * cm, 5.8 * cm, 2.2 * cm], repeatRows=1)
     t.setStyle(TableStyle([
@@ -367,6 +377,55 @@ def tab_table():
     return t
 
 
+def supporting_docs_table():
+    hdr = ParagraphStyle("sdh", fontName="Helvetica-Bold", fontSize=10,
+                         leading=12, textColor=colors.white)
+    name = ParagraphStyle("sdn", fontName="Courier-Bold", fontSize=9,
+                          leading=12, textColor=NAVY)
+    body = ParagraphStyle("sdb", fontName="Helvetica", fontSize=9.5,
+                          leading=13, textColor=colors.HexColor("#1A1A1A"))
+
+    rows = [
+        [Paragraph("File", hdr), Paragraph("What's inside", hdr)],
+        [Paragraph("README.md", name),
+         Paragraph("Project overview, setup, run instructions, evaluation rationale "
+                   "(threshold tuning), and full credits for packages, datasets and methods.", body)],
+        [Paragraph("docs/EarningsLens_<br/>User_Guide.pdf", name),
+         Paragraph("This document. End-user guide with screenshots, sidebar walk-through "
+                   "and troubleshooting.", body)],
+        [Paragraph("docs/<br/>architecture.md", name),
+         Paragraph("Pipeline architecture, module responsibilities, and data-flow diagram.", body)],
+        [Paragraph("docs/<br/>course-concepts.md", name),
+         Paragraph("Row-by-row mapping between the concepts taught in <i>Introduction to "
+                   "AI for Business</i> and the files where each concept is applied.", body)],
+        [Paragraph("PROMPTS.md", name),
+         Paragraph("Log of the prompts that were issued to AI coding assistants (Claude Code, "
+                   "ChatGPT, GitHub Copilot) during development, with a description of which "
+                   "code each set of prompts produced.", body)],
+        [Paragraph("data/samples/<br/>SOURCES.md", name),
+         Paragraph("Attribution, call dates and licensing notes for the four bundled "
+                   "earnings-call transcripts.", body)],
+        [Paragraph("tests/", name),
+         Paragraph("25 <b>pytest</b> regression tests covering the parser, the evasion rubric, "
+                   "score-adjustment heuristics, the question splitter and the answer-filler "
+                   "stripper.", body)],
+    ]
+    t = Table(rows, colWidths=[4.6 * cm, 11.4 * cm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BG]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("BOX", (0, 0), (-1, -1), 0.4, RULE),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.6, NAVY),
+        ("INNERGRID", (0, 1), (-1, -1), 0.3, RULE),
+    ]))
+    return t
+
+
 def build():
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     styles = make_styles()
@@ -396,7 +455,7 @@ def build():
     story.append(HRFlowable(width="100%", thickness=1.2, color=ACCENT, spaceBefore=0, spaceAfter=10))
     story.append(Paragraph(
         "EarningsLens reads two consecutive earnings call transcripts from the same company and "
-        "produces a concise, analyst-style brief. It runs five independent analyses in parallel — "
+        "produces a concise, analyst-style brief. It runs five independent analyses — "
         "sentiment, hedging, topic drift, risk vocabulary, and Q&amp;A evasion — then synthesises "
         "the structured outputs into a short narrative.",
         styles["ELBody"]))
@@ -409,7 +468,8 @@ def build():
     story.append(bullet("A headline <b>GREEN / AMBER / RED</b> signal summarising the quarter-over-quarter read.", styles))
     story.append(bullet("Five diagnostic tabs you can drill into independently.", styles))
     story.append(bullet("A short, written analyst brief that grounds itself in the structured outputs.", styles))
-    story.append(bullet("Provenance for every analysis so you know whether it came from the main path or a fallback.", styles))
+    story.append(bullet("Provenance for every analysis so you know whether the score came from the local LLM or a deterministic backup pass.", styles))
+    story.append(bullet("Hard errors are surfaced directly — if an analysis fails, the app halts and shows the exception rather than silently substituting placeholder numbers.", styles))
 
     story.append(Paragraph("The headline signal", styles["ELH2"]))
     story.append(signal_table())
@@ -455,9 +515,11 @@ def build():
         "streamlit run app.py",
         styles["ELCode"]))
     story.append(Paragraph(
-        "On macOS you can also double-click <b>launch.command</b> from Finder. The first launch "
-        "downloads the three models — expect a few minutes — and subsequent launches start in "
-        "seconds thanks to the on-disk model cache.",
+        "You can also start the app without typing any commands: double-click "
+        "<b>launch.command</b> from Finder on macOS, or <b>launch.bat</b> from File Explorer on "
+        "Windows. Both scripts activate the local virtualenv, verify dependencies, and launch "
+        "Streamlit. The first launch downloads the three models — expect a few minutes — and "
+        "subsequent launches start in seconds thanks to the on-disk model cache.",
         styles["ELBody"]))
 
     story.append(Paragraph("4. Optional health checks", styles["ELH2"]))
@@ -492,8 +554,8 @@ def build():
     story.append(bullet("<b>Mode</b> — choose <b>Search company</b> to fetch real transcripts by ticker, or <b>Use sample</b> for built-in demo pairs.", styles))
     story.append(bullet("<b>Input selection</b> — use sidebar dropdowns to pick or search companies and compare quarters.", styles))
     story.append(bullet("<b>Show diagnostics</b> — toggle to surface parsed speaker roles, turn segmentation, evasion confidence scores, and analysis provenance.", styles))
-    story.append(bullet("<b>Configuration</b> — thresholds and timeouts are set in <b>.env</b>, not the sidebar. Adjust "
-                   "<b>ANALYSIS_TIMEOUT_SECONDS</b> or <b>EVASION_BATCH_SIZE</b> if needed.", styles))
+    story.append(bullet("<b>Configuration</b> — thresholds are set in <b>.env</b>, not the sidebar. Keep "
+                   "<b>LOW_MEMORY_MODE=1</b> for lower peak RAM, or set it to 0 for faster parallel execution.", styles))
 
     story.append(Paragraph("The five analyses", styles["ELH2"]))
     story.append(tab_table())
@@ -502,8 +564,10 @@ def build():
     story.append(Paragraph(
         "The brief at the top of the page is generated by the local instruct model from the "
         "structured outputs above — not from the raw transcripts. That keeps the synthesis "
-        "anchored to explicit evidence and reduces the risk of hallucinated quotes. If a section "
-        "fell back, the brief will say so via the provenance badge.",
+        "anchored to explicit evidence and reduces the risk of hallucinated quotes. When the "
+        "LLM returns an unusable response for a specific Q&amp;A pair or theme list, a "
+        "deterministic backup pass (heuristic scoring, n-gram theme extraction, rule-based "
+        "summary) takes over for just that piece and the provenance badge marks it accordingly.",
         styles["ELBody"]))
 
     # Under the hood
@@ -544,25 +608,74 @@ def build():
         "the cache and are much faster.",
         styles["ELBody"]))
 
-    story.append(Paragraph(“An analysis shows a \”fallback\” badge”, styles[“ELH3”]))
+    story.append(Paragraph("A score shows a heuristic or extract badge", styles["ELH3"]))
     story.append(Paragraph(
-        “The main model path exceeded the per-analysis timeout or raised an error, so a simpler “
-        “fallback path was used. The headline signal still works; treat the fallback section as “
-        “lower-confidence. To increase the timeout, set <b>ANALYSIS_TIMEOUT_SECONDS</b> in <b>.env</b> “
-        “(default 300) and restart the app.”,
-        styles[“ELBody”]))
+        "The local LLM returned an unparseable response for that item, so a deterministic backup "
+        "pass took over (heuristic Q&amp;A scoring, n-gram theme extraction, or rule-based summary). "
+        "The score is still valid but is built from explicit rules rather than the model — treat "
+        "it as lower-confidence and re-read the underlying turn if it drives a flag.",
+        styles["ELBody"]))
+
+    story.append(Paragraph("The app stops with a red error box", styles["ELH3"]))
+    story.append(Paragraph(
+        "An analysis raised an exception. EarningsLens no longer silently substitutes "
+        "placeholder numbers — the failing stage and its exception are shown verbatim and the "
+        "run is aborted so you don't read a brief built from missing inputs. Common causes: a "
+        "transcript that is too short, a model file that did not finish downloading, or an "
+        "out-of-memory error on the local LLM. Re-run after addressing the cause.",
+        styles["ELBody"]))
 
     story.append(Paragraph("Q&amp;A pairs look mismatched", styles["ELH3"]))
     story.append(Paragraph(
-        "Low-confidence pairs — moderator interjections, paste artefacts, or speaker role ambiguity — "
-        "are automatically downweighted in the evasion scoring (minimum confidence threshold 0.55). "
-        "Enable <b>Show diagnostics</b> to inspect pair confidence scores.",
+        "The parser merges consecutive turns from the same speaker and strips common openers "
+        "(<i>“A separate question,”</i> <i>“One quick one,”</i>) and conversational fillers "
+        "(<i>“Yeah, sure, thanks for the question…”</i>) before scoring. Pairs that still look "
+        "ambiguous — moderator interjections, paste artefacts, role uncertainty — are "
+        "downweighted by the parser-confidence threshold (0.55) and excluded from flags. "
+        "Enable <b>Show diagnostics</b> to inspect per-pair confidence.",
         styles["ELBody"]))
 
     story.append(Paragraph("Alpha Vantage rate limits", styles["ELH3"]))
     story.append(Paragraph(
         "The free tier is limited. If a fetch fails, wait a minute and retry, or fall back to "
         "the sample mode while you iterate.",
+        styles["ELBody"]))
+
+    # Supporting documents
+    story.append(PageBreak())
+    story.append(Paragraph("Supporting documents", styles["ELH1"]))
+    story.append(HRFlowable(width="100%", thickness=1.2, color=ACCENT, spaceBefore=0, spaceAfter=10))
+    story.append(Paragraph(
+        "EarningsLens ships with a small set of companion documents so reviewers can trace any "
+        "claim in the app back to its source. They live next to the code in the repository.",
+        styles["ELBody"]))
+    story.append(supporting_docs_table())
+
+    story.append(Paragraph("How thresholds were set", styles["ELH2"]))
+    story.append(Paragraph(
+        "The five flag thresholds — sentiment gap, hedging delta, topic similarity, evasion "
+        "responsiveness and parser confidence floor — were tuned on the four bundled sample "
+        "transcripts plus a handful of additional public calls that are not committed to the "
+        "repository. The rationale for each value is documented in the <b>Evaluation</b> section "
+        "of <b>README.md</b>. The numbers live in <b>earningslens/config.py</b> and can be "
+        "overridden via environment variables.",
+        styles["ELBody"]))
+
+    story.append(Paragraph("Use of AI coding assistants", styles["ELH2"]))
+    story.append(Paragraph(
+        "Per the assignment brief, the dev-time use of AI coding tools (Claude Code, ChatGPT, "
+        "GitHub Copilot) is logged in <b>PROMPTS.md</b> at the repository root. That file "
+        "lists the prompts that were used to scaffold the parser, design the Q&amp;A rubric, "
+        "audit performance, and draft the documentation. All generated code was reviewed and "
+        "tested by a human team member before being committed.",
+        styles["ELBody"]))
+
+    story.append(Paragraph("Sample transcript attribution", styles["ELH2"]))
+    story.append(Paragraph(
+        "The Goldman Sachs and Microsoft transcripts under <b>data/samples/</b> are publicly "
+        "available earnings calls reproduced here for non-commercial educational use. Full "
+        "attribution, call dates, and a citation-ready format are documented in "
+        "<b>data/samples/SOURCES.md</b>.",
         styles["ELBody"]))
 
     # Closing
@@ -579,7 +692,7 @@ def build():
     story.append(HRFlowable(width="100%", thickness=0.6, color=RULE))
     story.append(Spacer(1, 6))
     story.append(Paragraph(
-        "EarningsLens · User Guide · v1.0 · Generated locally — no transcript data leaves your machine.",
+        "EarningsLens · User Guide · v1.1 · Generated locally — no transcript data leaves your machine.",
         styles["ELFooter"]))
 
     doc.build(story)

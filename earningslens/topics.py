@@ -11,6 +11,7 @@ from rapidfuzz import fuzz
 
 from earningslens import config, prompts
 from earningslens.local_llm import generate_text
+from earningslens.model_memory import clear_model_memory
 from earningslens.models import TopicDrift, Transcript
 from earningslens.vocab import RISK_KEYWORDS
 
@@ -34,6 +35,11 @@ def _get_embedder():
 
 def warmup_topic_models() -> None:
     _get_embedder()
+
+
+def release_topic_models() -> None:
+    _get_embedder.cache_clear()
+    clear_model_memory()
 
 
 def _chunk_text(text: str, max_words: int = 320) -> list[str]:
@@ -170,6 +176,8 @@ def analyze_topics(current: Transcript, prior: Transcript) -> TopicDrift:
     current_emb = _mean_embedding(current.prepared_text)
     prior_emb = _mean_embedding(prior.prepared_text)
     semantic_similarity = _cosine_similarity(current_emb, prior_emb)
+    if config.LOW_MEMORY_MODE:
+        release_topic_models()
 
     current_themes, prior_themes, source, notes = _extract_themes_pair(current.prepared_text, prior.prepared_text)
     new_themes = _set_difference(current_themes, prior_themes)

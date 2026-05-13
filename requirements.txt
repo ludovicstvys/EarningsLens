@@ -1,11 +1,29 @@
-streamlit>=1.32
-transformers>=4.40
-torch>=2.2
-sentence-transformers>=2.7
-pydantic>=2.6
-python-dotenv>=1.0
-rapidfuzz>=3.6
-reportlab>=4.1
-numpy>=1.26
-pytest>=8.0
-requests>=2.31
+# EarningsLens — pinned dependencies
+# Versions below were the ones used to record the demo and verify the test suite.
+# To reproduce the exact environment: `pip install -r requirements.txt`
+
+# UI
+streamlit==1.57.0
+
+# Deep-learning stack (torch wheels are platform-specific; pinning the version
+# keeps the API surface stable across machines).
+torch==2.11.0
+transformers==5.8.0
+tokenizers==0.22.2
+safetensors==0.7.0
+sentence-transformers==5.4.1
+
+# Numerical / scientific
+numpy==2.4.4
+scipy==1.17.1
+scikit-learn==1.8.0
+
+# App utilities
+pydantic==2.13.4
+python-dotenv==1.2.2
+RapidFuzz==3.14.5
+requests==2.33.1
+reportlab==4.5.0
+
+# Testing
+pytest==9.0.3

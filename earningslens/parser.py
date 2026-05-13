@@ -169,6 +169,21 @@ def parse_transcript(text: str, company: str, quarter: str, ticker: str | None =
     if current_turn:
         detected_turns.append(current_turn)
 
+    merged_turns: list[dict[str, object]] = []
+    for turn in detected_turns:
+        if (
+            merged_turns
+            and turn["speaker"] != "Unknown"
+            and merged_turns[-1]["speaker"] == turn["speaker"]
+        ):
+            previous = merged_turns[-1]
+            previous["text_parts"].extend(turn["text_parts"])  # type: ignore[union-attr]
+            if not previous.get("title") and turn.get("title"):
+                previous["title"] = turn["title"]
+            continue
+        merged_turns.append(turn)
+    detected_turns = merged_turns
+
     if not detected_turns:
         detected_turns = [{
             "speaker": "Unknown",

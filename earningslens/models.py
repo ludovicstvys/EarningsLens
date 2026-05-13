@@ -87,12 +87,20 @@ class EvasionAnswerTurn(BaseModel):
     text: str
 
 
+class EvasionCoverageItem(BaseModel):
+    part: str
+    status: Literal["answered", "partial", "missed"]
+    reasoning: str
+
+
 class EvasionScore(BaseModel):
     question: str
     question_speaker: str
     answer: str
     answer_speaker: str
     answer_turns: list[EvasionAnswerTurn] = Field(default_factory=list)
+    question_parts: list[str] = Field(default_factory=list)
+    coverage: list[EvasionCoverageItem] = Field(default_factory=list)
     responsiveness: int
     reasoning: str
     flagged: bool

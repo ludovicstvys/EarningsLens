@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from earningslens import config
+from earningslens.model_memory import clear_model_memory
 
 LOGGER = logging.getLogger(__name__)
 _GENERATION_LOCK = Lock()
@@ -103,15 +104,81 @@ def generate_text(prompt: str, max_new_tokens: int = 300) -> str:
 
         prompt_text = _build_prompt(prompt)
         inputs = _prepare_inputs(prompt_text, tokenizer, device)
+        generated = None
+        new_tokens = None
+        try:
+            with torch.inference_mode():
+                generated = model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
 
-        with torch.no_grad():
-            generated = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
+            new_tokens = generated[0][inputs["input_ids"].shape[1]:]
+            return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        finally:
+            del inputs
+            if generated is not None:
+                del generated
+            if new_tokens is not None:
+                del new_tokens
+
+
+def generate_text_batch(prompts: list[str], max_new_tokens: int = 64) -> list[str]:
+    if not prompts:
+        return []
+    if len(prompts) == 1:
+        return [generate_text(prompts[0], max_new_tokens=max_new_tokens)]
+
+    with _GENERATION_LOCK:
+        tokenizer = _get_tokenizer()
+        model = _get_model()
+        device, _ = _device_config()
+
+        original_padding_side = getattr(tokenizer, "padding_side", "right")
+        tokenizer.padding_side = "left"
+        input_ids = None
+        attention_mask = None
+        generated = None
+        try:
+            prompt_texts = [_build_prompt(prompt) for prompt in prompts]
+            max_input_tokens = _max_input_tokens(tokenizer)
+            encoded = tokenizer(
+                prompt_texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_input_tokens,
+                add_special_tokens=True,
             )
+            input_ids = encoded["input_ids"].to(device)
+            attention_mask = encoded["attention_mask"].to(device)
+            input_length = input_ids.shape[1]
+            with torch.inference_mode():
+                generated = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=False,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+            new_tokens = generated[:, input_length:]
+            decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            return [text.strip() for text in decoded]
+        finally:
+            tokenizer.padding_side = original_padding_side
+            if input_ids is not None:
+                del input_ids
+            if attention_mask is not None:
+                del attention_mask
+            if generated is not None:
+                del generated
 
-        new_tokens = generated[0][inputs["input_ids"].shape[1]:]
-        return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+def release_local_llm() -> None:
+    _get_tokenizer.cache_clear()
+    _get_model.cache_clear()
+    clear_model_memory()

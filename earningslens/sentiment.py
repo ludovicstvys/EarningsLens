@@ -5,6 +5,7 @@ import re
 from functools import lru_cache
 
 from earningslens import config
+from earningslens.model_memory import clear_model_memory
 from earningslens.models import SentimentAnalysis, Transcript
 
 LOGGER = logging.getLogger(__name__)
@@ -20,6 +21,11 @@ def _get_finbert():
 
 def warmup_sentiment_model() -> None:
     _get_finbert()
+
+
+def release_sentiment_model() -> None:
+    _get_finbert.cache_clear()
+    clear_model_memory()
 
 
 def _analysis_section_text(transcript: Transcript, section: str) -> str:

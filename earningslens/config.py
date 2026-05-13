@@ -15,6 +15,13 @@ FINBERT_MODEL_ID = os.getenv("FINBERT_MODEL", "ProsusAI/finbert")
 SENTENCE_EMBEDDER_MODEL_ID = os.getenv("SENTENCE_EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _preferred_model_source(env_var: str, local_subdir: str, model_id: str) -> str:
     explicit = os.getenv(env_var)
     if explicit:
@@ -39,6 +46,6 @@ HEDGING_FLAG_THRESHOLD = 25.0
 SENTIMENT_FLAG_THRESHOLD = -0.15
 TOPIC_SIMILARITY_THRESHOLD = 0.75
 EVASION_FLAG_THRESHOLD = 4
-EVASION_BATCH_SIZE = int(os.getenv("EVASION_BATCH_SIZE", "6"))
+EVASION_BATCH_SIZE = int(os.getenv("EVASION_BATCH_SIZE", "3"))
 MIN_QA_PAIR_CONFIDENCE = 0.55
-ANALYSIS_TIMEOUT_SECONDS = int(os.getenv("ANALYSIS_TIMEOUT_SECONDS", "300"))
+LOW_MEMORY_MODE = _env_flag("LOW_MEMORY_MODE", default=True)

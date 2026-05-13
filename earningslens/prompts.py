@@ -36,51 +36,18 @@ Respond with ONLY this JSON — no markdown, no preamble:
 }}
 """
 
-EVASION_SCORING_PROMPT = """You are scoring whether an executive's answer actually addressed an analyst's question on an earnings call.
+EVASION_SCORING_PROMPT = """You score how responsively an executive answered an analyst on an earnings call.
+Output exactly two lines and nothing else:
+SCORE: <integer 0-10>
+WHY: <one sentence naming the specific answered or missing detail>
 
-ANALYST QUESTION (asked by {q_speaker}):
-\"\"\"
-{question}
-\"\"\"
+Scale: 9-10 fully and specifically answers; 7-8 answers with some hedging; 4-6 pivots to adjacent topics or generalities; 0-3 refuses or changes the subject.
 
-EXECUTIVE ANSWER (given by {a_speaker}):
-\"\"\"
-{answer}
-\"\"\"
+Penalize: declining to quantify when the analyst asked for numbers; pivoting to unrelated good news; vague corporate boilerplate.
+Do not penalize: legitimately deferring to a future quarter's guidance when the analyst asked about future guidance.
 
-Score the answer's responsiveness on a 0–10 scale:
-- 10 = Direct, specific, fully answers what was asked.
-- 7–9 = Answers the question but with some hedging or partial information.
-- 4–6 = Pivots to adjacent topics or gives generalities instead of specifics.
-- 0–3 = Clearly evades — refuses to answer, changes subject, or gives non-answer corporate boilerplate.
-
-Penalize: declining to quantify when a quantitative answer was asked; pivoting to unrelated good news; "we don't comment on..." when context suggests they could.
-Do not penalize: legitimate "we'll address in next quarter's guidance" if the question genuinely asked about future guidance.
-
-Respond with ONLY a valid JSON object using this shape. Use an integer score and one short sentence:
-{{"responsiveness": 7, "reasoning": "The answer addressed the topic but did not provide all requested detail."}}
-"""
-
-EVASION_BATCH_SCORING_PROMPT = """You are scoring whether executives' answers actually addressed analysts' questions on an earnings call.
-
-For each Q&A pair below, score the answer's responsiveness on a 0–10 scale:
-- 10 = Direct, specific, fully answers what was asked.
-- 7–9 = Answers the question but with some hedging or partial information.
-- 4–6 = Pivots to adjacent topics or gives generalities instead of specifics.
-- 0–3 = Clearly evades — refuses to answer, changes subject, or gives non-answer corporate boilerplate.
-
-Penalize: declining to quantify when a quantitative answer was asked; pivoting to unrelated good news; "we don't comment on..." when context suggests they could.
-Do not penalize: legitimate "we'll address in next quarter's guidance" if the question genuinely asked about future guidance.
-
-Q&A PAIRS JSON:
-{qa_pairs_json}
-
-Respond with ONLY a valid JSON object. Include exactly one score object for every pair_id in the input:
-{{
-  "scores": [
-    {{"pair_id": 0, "responsiveness": 7, "reasoning": "The answer addressed the topic but did not provide all requested detail."}}
-  ]
-}}
+QUESTION ({q_speaker}): {question}
+ANSWER ({a_speaker}): {answer}
 """
 
 SYNTHESIS_PROMPT = """You are a senior equity analyst writing the top of a 1-page brief on {company}'s {quarter} earnings call vs {prior_quarter}.

@@ -1,40 +1,40 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from statistics import mean
 
 from earningslens import config, prompts
-from earningslens.local_llm import generate_text
-from earningslens.models import EvasionAnswerTurn, EvasionScore, SpeakerTurn, Transcript
+from earningslens.local_llm import generate_text_batch
+from earningslens.model_memory import clear_model_memory
+from earningslens.models import EvasionAnswerTurn, EvasionCoverageItem, EvasionScore, SpeakerTurn, Transcript
 
 LOGGER = logging.getLogger(__name__)
 WORD_RE = re.compile(r"\b[a-z0-9]+\b")
 QUANT_HINT_RE = re.compile(r"\b(how much|how many|quantify|percentage|percent|basis points|bps|number|amount|magnitude)\b", re.IGNORECASE)
 MULTIPART_HINT_RE = re.compile(r"\b(and|as well as|whether)\b", re.IGNORECASE)
 NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?%?\b")
-
-
-def _extract_json(text: str) -> dict:
-    decoder = json.JSONDecoder()
-    candidates: list[dict] = []
-    for match in re.finditer(r"{", text):
-        try:
-            payload, _end = decoder.raw_decode(text[match.start() :])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            candidates.append(payload)
-
-    if not candidates:
-        raise ValueError("Local model response did not contain valid JSON.")
-
-    for key in ("scores", "responsiveness", "themes", "current_themes"):
-        keyed_candidates = [item for item in candidates if key in item]
-        if keyed_candidates:
-            return keyed_candidates[-1]
-    return candidates[-1]
+QUESTION_START_RE = re.compile(r"\b(can you|could you|would you|how|what|where|when|why|whether|is there|are there|do you|does|did)\b", re.IGNORECASE)
+FILLER_PREFIX_RE = re.compile(r"^(and|also|then|secondly|second|first|finally|just|maybe|on that|relatedly)\s*,?\s+", re.IGNORECASE)
+META_PREAMBLE_RE = re.compile(
+    r"^(?:a |one |my |last |another |separate |follow[- ]?up |quick |different |next |final )?"
+    r"(?:quick |brief |short |separate |different |follow[- ]?up |last |final )?"
+    r"(?:question|one|thing|topic|note|point|item|ask)s?\b[^.?!]{0,40}[.,:!]\s+",
+    re.IGNORECASE,
+)
+ANSWER_FILLER_PREFIX_RE = re.compile(
+    r"^(?:(?:yeah|yes|yep|sure|right|ok|okay|absolutely|certainly|of course|"
+    r"great question|good question|thanks(?:\s+for\s+(?:the|that)\s+question)?|"
+    r"thank you(?:\s+for\s+(?:the|that)\s+question)?|well)[\s,.!]+)+",
+    re.IGNORECASE,
+)
+SCORE_LINE_RE = re.compile(r"^\s*SCORE\s*[:=]?\s*(\d{1,2})(?:\s*/\s*10)?\s*$", re.IGNORECASE | re.MULTILINE)
+WHY_LINE_RE = re.compile(
+    r"(?:WHY|REASON|REASONING|RATIONALE|EXPLANATION)\s*[:=]?\s*(.+?)(?:\n\s*\n|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+CoverageTuple = tuple[str, str, str]
+ScoreTuple = tuple[int, str, list[CoverageTuple]]
 
 
 def _truncate_for_prompt(text: str, max_words: int = 140) -> str:
@@ -44,6 +44,73 @@ def _truncate_for_prompt(text: str, max_words: int = 140) -> str:
     head_words = max_words * 2 // 3
     tail_words = max_words - head_words
     return " ".join(words[:head_words] + ["..."] + words[-tail_words:])
+
+
+def _clean_question_part(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    for _ in range(2):
+        stripped = META_PREAMBLE_RE.sub("", cleaned, count=1).strip()
+        if stripped == cleaned:
+            break
+        cleaned = stripped
+    cleaned = cleaned.strip(" .?;:,")
+    cleaned = FILLER_PREFIX_RE.sub("", cleaned).strip(" .?;:,")
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else ""
+
+
+def _strip_answer_filler(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    stripped = ANSWER_FILLER_PREFIX_RE.sub("", cleaned).strip()
+    return stripped or cleaned
+
+
+def _split_question_parts(question: str) -> list[str]:
+    text = re.sub(r"\s+", " ", question).strip()
+    if not text:
+        return []
+
+    candidates: list[str] = []
+    for sentence in re.split(r"\?\s+|;\s+", text):
+        cleaned = _clean_question_part(sentence)
+        if cleaned:
+            candidates.append(cleaned)
+
+    if len(candidates) == 1:
+        base = candidates[0]
+        should_split = (
+            len(WORD_RE.findall(base)) >= 14
+            and (
+                re.search(r"\b(and whether|and how|and what|and where|and when|and why|as well as whether|as well as how)\b", base, re.IGNORECASE)
+                or (QUANT_HINT_RE.search(base) and re.search(r"\b(whether|by segment|by geography|by product|by region)\b", base, re.IGNORECASE))
+            )
+        )
+        if should_split:
+            candidates = [_clean_question_part(part) for part in re.split(r"\b(?:and|as well as)\b(?=\s+(?:whether|how|what|where|when|why|by segment|by geography|by product|by region))", base, flags=re.IGNORECASE)]
+            candidates = [part for part in candidates if part]
+
+    if len(candidates) == 1:
+        base = candidates[0]
+        starts = list(QUESTION_START_RE.finditer(base))
+        if len(starts) > 1 and len(WORD_RE.findall(base)) >= 18:
+            split_candidates: list[str] = []
+            for idx, match in enumerate(starts):
+                end = starts[idx + 1].start() if idx + 1 < len(starts) else len(base)
+                part = _clean_question_part(base[match.start() : end])
+                if part:
+                    split_candidates.append(part)
+            if len(split_candidates) > 1:
+                candidates = split_candidates
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if len(WORD_RE.findall(candidate)) < 3:
+            continue
+        key = re.sub(r"\W+", " ", candidate.lower()).strip()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+    return (deduped or [_clean_question_part(text)])[:4]
 
 
 def _token_set(text: str) -> set[str]:
@@ -68,7 +135,7 @@ def _fallback_reasoning(question: str, answer: str, responsiveness: int | None =
     if MULTIPART_HINT_RE.search(lowered_question) and "segment" in lowered_question and "segment" not in lowered_answer:
         notes.append("The answer did not clearly address every part of the multi-part question.")
     if not notes and responsiveness is not None and responsiveness >= 8:
-        notes.append("The answer addressed the main question with relevant demand, capacity, monetization, and efficiency details.")
+        notes.append("The answer addressed the main question with relevant operational detail.")
     if not notes and responsiveness is not None and responsiveness >= 6:
         notes.append("The answer addressed the topic directionally but did not fully resolve every part of the question.")
     if not notes:
@@ -78,46 +145,10 @@ def _fallback_reasoning(question: str, answer: str, responsiveness: int | None =
 
 def _content_tokens(text: str) -> set[str]:
     stopwords = {
-        "a",
-        "about",
-        "all",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "because",
-        "but",
-        "by",
-        "can",
-        "do",
-        "for",
-        "from",
-        "how",
-        "i",
-        "in",
-        "is",
-        "it",
-        "of",
-        "on",
-        "or",
-        "our",
-        "that",
-        "the",
-        "their",
-        "there",
-        "these",
-        "think",
-        "this",
-        "to",
-        "we",
-        "what",
-        "where",
-        "which",
-        "who",
-        "with",
-        "you",
+        "a", "about", "all", "an", "and", "are", "as", "at", "be", "because", "but", "by", "can",
+        "do", "for", "from", "how", "i", "in", "is", "it", "of", "on", "or", "our", "that", "the",
+        "their", "there", "these", "think", "this", "to", "we", "what", "where", "which", "who",
+        "with", "you",
     }
     return {token for token in WORD_RE.findall(text.lower()) if len(token) > 2 and token not in stopwords}
 
@@ -171,7 +202,7 @@ def _looks_like_invalid_reasoning(reasoning: str) -> bool:
         return True
     if "<" in reasoning or ">" in reasoning:
         return True
-    if normalized in {"reasoning", "one sentence", "fallback score from single-pair pass"}:
+    if normalized in {"reasoning", "one sentence", "fallback score from heuristic pass"}:
         return True
     if re.fullmatch(r"(responsiveness|score)\s*[:=]?\s*\d{1,2}(?:/10)?\.?", normalized):
         return True
@@ -180,8 +211,65 @@ def _looks_like_invalid_reasoning(reasoning: str) -> bool:
     return False
 
 
+def _looks_like_vague_reasoning(reasoning: str) -> bool:
+    normalized = re.sub(r"\s+", " ", reasoning).strip().lower()
+    vague_phrases = (
+        "addressed the topic but did not provide all requested detail",
+        "addressed the topic but lacked some detail",
+        "addressed the topic but stayed broad",
+    )
+    return any(phrase in normalized for phrase in vague_phrases) and len(_content_tokens(reasoning)) <= 8
+
+
+def _coverage_reasoning(coverage: list[CoverageTuple]) -> str:
+    missed = [part for part, status, _r in coverage if status == "missed"]
+    partial = [part for part, status, _r in coverage if status == "partial"]
+    answered = [part for part, status, _r in coverage if status == "answered"]
+    if missed:
+        return f"The answer did not address: {missed[0]}."
+    if partial:
+        return f"The answer only partially addressed: {partial[0]}."
+    if answered:
+        return "The answer addressed the identified question parts with relevant detail."
+    return "The answer was scored without structured coverage detail."
+
+
+def _derive_score_from_coverage(coverage: list[CoverageTuple], model_score: int | None = None) -> int:
+    if not coverage:
+        return max(0, min(10, int(model_score or 0)))
+    values = {"answered": 1.0, "partial": 0.5, "missed": 0.0}
+    ratio = sum(values.get(status, 0.5) for _p, status, _r in coverage) / len(coverage)
+    missed_count = sum(1 for _p, status, _r in coverage if status == "missed")
+    partial_count = sum(1 for _p, status, _r in coverage if status == "partial")
+    if ratio == 1:
+        return 9 if model_score is None else max(8, min(10, model_score))
+    if missed_count == 0:
+        return 7 if partial_count else 8
+    if ratio >= 0.5:
+        return 6
+    if ratio >= 0.25:
+        return 4
+    return 3
+
+
+def _heuristic_coverage(question_parts: list[str], answer: str) -> list[CoverageTuple]:
+    coverage: list[CoverageTuple] = []
+    for part in question_parts:
+        overlap = _content_overlap(part, answer)
+        if QUANT_HINT_RE.search(part) and not NUMBER_RE.search(answer):
+            coverage.append((part, "partial" if overlap >= 0.1 else "missed", "The answer did not provide the requested figure or range."))
+        elif "segment" in part.lower() and "segment" not in answer.lower():
+            coverage.append((part, "partial" if overlap >= 0.1 else "missed", "The answer did not give segment-specific detail."))
+        elif overlap >= 0.25:
+            coverage.append((part, "answered", "The answer discussed this part with overlapping specifics."))
+        elif overlap >= 0.1:
+            coverage.append((part, "partial", "The answer touched this part but stayed broad."))
+        else:
+            coverage.append((part, "missed", "The answer did not materially address this part."))
+    return coverage
+
+
 def _heuristic_score_single_pair(question: str, answer: str) -> tuple[int, str]:
-    question_tokens = _content_tokens(question)
     answer_tokens = _content_tokens(answer)
     answer_word_count = len(WORD_RE.findall(answer))
     overlap = _content_overlap(question, answer)
@@ -203,23 +291,43 @@ def _heuristic_score_single_pair(question: str, answer: str) -> tuple[int, str]:
     return 4, "The answer mostly discussed adjacent themes rather than the specific question asked."
 
 
-def _adjust_score(question: str, answer: str, answer_speaker: str, responsiveness: int, reasoning: str) -> tuple[int, str, list[str]]:
+def _adjust_score(
+    question: str,
+    answer: str,
+    answer_speaker: str,
+    responsiveness: int,
+    reasoning: str,
+    coverage: list[CoverageTuple],
+) -> tuple[int, str, list[str]]:
     notes: list[str] = []
     adjusted = responsiveness
     final_reasoning = reasoning.strip()
     lowered_question = question.lower()
     lowered_answer = answer.lower()
 
+    if coverage:
+        missed_count = sum(1 for _p, status, _r in coverage if status == "missed")
+        partial_count = sum(1 for _p, status, _r in coverage if status == "partial")
+        if missed_count and adjusted >= 8:
+            adjusted = 6 if missed_count == 1 and partial_count == 0 else 4
+            notes.append("Capped score because coverage analysis found missed question parts.")
+        elif missed_count == 0 and partial_count == 0 and adjusted < 7:
+            adjusted = 7
+
+    if _looks_like_vague_reasoning(final_reasoning):
+        final_reasoning = _coverage_reasoning(coverage) if coverage else _fallback_reasoning(question, answer, adjusted)
+        notes.append("Model reasoning was too generic; replaced with coverage-based explanation.")
+
     if _looks_like_echo(final_reasoning, answer):
-        final_reasoning = _fallback_reasoning(question, answer, adjusted)
+        final_reasoning = _coverage_reasoning(coverage) if coverage else _fallback_reasoning(question, answer, adjusted)
         notes.append("Model reasoning echoed the answer; replaced with fallback explanation.")
 
     if _looks_like_invalid_reasoning(final_reasoning):
-        final_reasoning = _fallback_reasoning(question, answer, adjusted)
+        final_reasoning = _coverage_reasoning(coverage) if coverage else _fallback_reasoning(question, answer, adjusted)
         notes.append("Model reasoning was invalid or placeholder-like; replaced with fallback explanation.")
 
     if _looks_like_speaker_names(final_reasoning, answer_speaker):
-        final_reasoning = _fallback_reasoning(question, answer, adjusted)
+        final_reasoning = _coverage_reasoning(coverage) if coverage else _fallback_reasoning(question, answer, adjusted)
         notes.append("Model reasoning contained only speaker names; replaced with fallback explanation.")
 
     if adjusted <= 3 and _looks_like_missing_question_claim(final_reasoning) and _content_overlap(question, answer) >= 0.05:
@@ -227,12 +335,14 @@ def _adjust_score(question: str, answer: str, answer_speaker: str, responsivenes
         notes.append("Model claimed the question was not asked despite content overlap; replaced with deterministic score.")
 
     if QUANT_HINT_RE.search(lowered_question) and not NUMBER_RE.search(answer):
+        if adjusted > 7:
+            notes.append("Capped score because a quantitative question was answered without concrete figures.")
         adjusted = min(adjusted, 7)
-        notes.append("Capped score because a quantitative question was answered without concrete figures.")
 
     if (" and " in lowered_question or "whether" in lowered_question) and "segment" in lowered_question and "segment" not in lowered_answer:
+        if adjusted > 7:
+            notes.append("Capped score because a multi-part question left the segment-specific part unanswered.")
         adjusted = min(adjusted, 7)
-        notes.append("Capped score because a multi-part question left the segment-specific part unanswered.")
 
     if adjusted == 10 and ("varied" in lowered_answer or "generally" in lowered_answer or "some" in lowered_answer):
         adjusted = 8
@@ -280,24 +390,44 @@ def _extract_pairs(transcript: Transcript) -> list[tuple[SpeakerTurn, list[Speak
     return pairs
 
 
+def _parse_score_response(response: str) -> tuple[int, str] | None:
+    if not response:
+        return None
+    score_match = SCORE_LINE_RE.search(response)
+    if not score_match:
+        return None
+    score = max(0, min(10, int(score_match.group(1))))
+    why_match = WHY_LINE_RE.search(response)
+    if why_match:
+        why = re.sub(r"\s+", " ", why_match.group(1)).strip(" .;:,")
+    else:
+        why = ""
+    return score, why
+
+
 def _build_evasion_score(
     question: SpeakerTurn,
     answer_turns: list[SpeakerTurn],
     responsiveness: int,
     reasoning: str,
+    coverage: list[CoverageTuple] | None = None,
     pair_confidence: float = 1.0,
     low_confidence: bool = False,
     source: str = "model",
     notes: list[str] | None = None,
 ) -> EvasionScore:
     answer = " ".join(turn.text for turn in answer_turns)
+    scoring_answer = _strip_answer_filler(answer)
     answer_speaker = ", ".join(dict.fromkeys(turn.speaker for turn in answer_turns))
+    question_parts = _split_question_parts(question.text)
+    coverage_items = coverage if coverage else _heuristic_coverage(question_parts, scoring_answer)
     adjusted_responsiveness, adjusted_reasoning, adjustment_notes = _adjust_score(
         question.text,
-        answer,
+        scoring_answer,
         answer_speaker,
         responsiveness,
         reasoning,
+        coverage_items,
     )
     return EvasionScore(
         question=question.text,
@@ -305,6 +435,8 @@ def _build_evasion_score(
         answer=answer,
         answer_speaker=answer_speaker,
         answer_turns=[EvasionAnswerTurn(speaker=turn.speaker, text=turn.text) for turn in answer_turns],
+        question_parts=question_parts,
+        coverage=[EvasionCoverageItem(part=part, status=status, reasoning=item_reasoning) for part, status, item_reasoning in coverage_items],
         responsiveness=adjusted_responsiveness,
         reasoning=adjusted_reasoning,
         flagged=(adjusted_responsiveness <= config.EVASION_FLAG_THRESHOLD) and not low_confidence,
@@ -315,8 +447,14 @@ def _build_evasion_score(
     )
 
 
-def _score_single_pair(question: SpeakerTurn, answer_turns: list[SpeakerTurn]) -> tuple[int, str]:
-    answer = " ".join(turn.text for turn in answer_turns)
+RETRY_SUFFIX = (
+    "\n\nRespond with ONLY two lines: a SCORE line with an integer 0-10 and a WHY line with one sentence of evidence. "
+    "Do not copy the example or any placeholder text."
+)
+
+
+def _build_evasion_prompt(question: SpeakerTurn, answer_turns: list[SpeakerTurn]) -> tuple[str, str, list[str]]:
+    answer = _strip_answer_filler(" ".join(turn.text for turn in answer_turns))
     answer_speaker = ", ".join(dict.fromkeys(turn.speaker for turn in answer_turns))
     prompt = prompts.EVASION_SCORING_PROMPT.format(
         q_speaker=question.speaker,
@@ -324,148 +462,50 @@ def _score_single_pair(question: SpeakerTurn, answer_turns: list[SpeakerTurn]) -
         a_speaker=answer_speaker,
         answer=_truncate_for_prompt(answer, 180),
     )
-    retry_suffix = (
-        "\n\nIMPORTANT: Respond with a single valid JSON object only. "
-        'Do not include commentary, markdown, code fences, or copied transcript text. '
-        'Example: {"responsiveness": 7, "reasoning": "The answer addressed the topic but lacked some detail."}'
-    )
-    last_error: Exception | None = None
-    for attempt in range(2):
-        response = generate_text(prompt if attempt == 0 else prompt + retry_suffix, max_new_tokens=120)
-        try:
-            payload = _extract_json(response)
-            if "responsiveness" not in payload:
-                raise ValueError("Local model JSON did not include a responsiveness score.")
-            responsiveness = int(payload.get("responsiveness", 0))
-            reasoning = str(payload.get("reasoning", "")).strip() or "Fallback score from single-pair pass."
-            return max(0, min(10, responsiveness)), reasoning
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            last_error = exc
-            LOGGER.warning("Single-pair evasion parse failed on attempt %s: %s. Raw response: %r", attempt + 1, exc, response[:300])
-    LOGGER.warning("Using deterministic fallback for single-pair evasion scoring: %s", last_error)
-    return _heuristic_score_single_pair(question.text, answer)
+    return prompt, answer, _split_question_parts(question.text)
 
 
-def _parse_batch_scores(payload: dict, expected_count: int) -> tuple[dict[int, tuple[int, str]], list[int]]:
-    raw_scores = payload.get("scores", [])
-    score_by_pair_id: dict[int, tuple[int, str]] = {}
-    if isinstance(raw_scores, list):
-        for item in raw_scores:
-            if not isinstance(item, dict):
-                continue
-            try:
-                pair_id = int(item.get("pair_id"))
-            except (TypeError, ValueError):
-                continue
-            if pair_id < 0 or pair_id >= expected_count:
-                continue
-            try:
-                responsiveness = int(item.get("responsiveness", 0))
-            except (TypeError, ValueError):
-                responsiveness = 0
-            reasoning = str(item.get("reasoning", "")).strip()
-            score_by_pair_id[pair_id] = (max(0, min(10, responsiveness)), reasoning)
-
-    missing_pair_ids = [pair_id for pair_id in range(expected_count) if pair_id not in score_by_pair_id]
-    return score_by_pair_id, missing_pair_ids
+def _resolve_llm_response(response: str, answer: str, question_parts: list[str]) -> ScoreTuple | None:
+    parsed = _parse_score_response(response)
+    if parsed is None:
+        return None
+    score, why = parsed
+    coverage = _heuristic_coverage(question_parts, answer)
+    if not why:
+        why = _coverage_reasoning(coverage)
+    return score, why, coverage
 
 
-def _chunked(items: list, chunk_size: int) -> list[list]:
-    safe_chunk_size = max(1, chunk_size)
-    return [items[idx : idx + safe_chunk_size] for idx in range(0, len(items), safe_chunk_size)]
+def _heuristic_score_tuple(question_text: str, answer: str, question_parts: list[str]) -> ScoreTuple:
+    coverage = _heuristic_coverage(question_parts, answer)
+    score, reasoning = _heuristic_score_single_pair(question_text, answer)
+    return score, reasoning, coverage
 
 
-def _score_scored_pairs_batch(scored_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]]) -> list[EvasionScore]:
-    prompt_items = []
-    for pair_id, (question, answer_turns, _pair_confidence, _notes) in enumerate(scored_pairs):
-        prompt_items.append(
-            {
-                "pair_id": pair_id,
-                "question_speaker": question.speaker,
-                "question": _truncate_for_prompt(question.text),
-                "answer_speaker": ", ".join(dict.fromkeys(turn.speaker for turn in answer_turns)),
-                "answer": _truncate_for_prompt(" ".join(turn.text for turn in answer_turns), 180),
-            }
-        )
-
-    prompt = prompts.EVASION_BATCH_SCORING_PROMPT.format(qa_pairs_json=json.dumps(prompt_items, ensure_ascii=True))
-    retry_suffix = (
-        "\n\nIMPORTANT: Respond with a single valid JSON object only. "
-        "Include every pair_id from the Q&A PAIRS JSON exactly once. "
-        'Do not include commentary, markdown, code fences, or copied transcript text.'
-    )
-    payload = None
-    best_partial_payload = None
-    last_error: Exception | None = None
-    for attempt in range(2):
-        response = generate_text(
-            prompt if attempt == 0 else prompt + retry_suffix,
-            max_new_tokens=min(360, 80 + len(prompt_items) * 45),
-        )
-        try:
-            candidate_payload = _extract_json(response)
-            _score_by_pair_id, missing_pair_ids = _parse_batch_scores(candidate_payload, len(scored_pairs))
-            if missing_pair_ids:
-                best_partial_payload = candidate_payload
-                raise ValueError(f"Batch evasion scorer omitted pair_ids {missing_pair_ids}.")
-            payload = candidate_payload
-            break
-        except (json.JSONDecodeError, ValueError) as exc:
-            last_error = exc
-            LOGGER.warning("Batch evasion parse failed on attempt %s: %s. Raw response: %r", attempt + 1, exc, response[:400])
-    if payload is None and best_partial_payload is not None:
-        payload = best_partial_payload
-    if payload is None:
-        LOGGER.warning("Falling back to single-pair evasion scoring for batch after parse failures: %s", last_error)
-        return [
-            _build_evasion_score(
-                question,
-                answer_turns,
-                *_score_single_pair(question, answer_turns),
-                pair_confidence=pair_confidence,
-                source="single_pair_fallback",
-                notes=notes,
-            )
-            for question, answer_turns, pair_confidence, notes in scored_pairs
-        ]
-
-    score_by_pair_id, missing_pair_ids = _parse_batch_scores(payload, len(scored_pairs))
-    if missing_pair_ids:
-        LOGGER.warning("Batch evasion scorer omitted pair_ids %s; rescoring individually.", missing_pair_ids)
-        for pair_id in missing_pair_ids:
-            question, answer_turns, _pair_confidence, _notes = scored_pairs[pair_id]
-            score_by_pair_id[pair_id] = _score_single_pair(question, answer_turns)
-
-    results: list[EvasionScore] = []
-    for pair_id, (question, answer_turns, pair_confidence, notes) in enumerate(scored_pairs):
-        responsiveness, reasoning = score_by_pair_id.get(pair_id, (0, "Unable to score this pair."))
-        source = "batch_llm" if pair_id not in missing_pair_ids else "single_pair_fallback"
-        results.append(
-            _build_evasion_score(
-                question,
-                answer_turns,
-                responsiveness,
-                reasoning,
-                pair_confidence=pair_confidence,
-                source=source,
-                notes=notes,
-            )
-        )
-    return results
+def _run_batch(prompts_list: list[str]) -> list[str]:
+    try:
+        return generate_text_batch(prompts_list, max_new_tokens=64)
+    except Exception as exc:
+        LOGGER.debug("Evasion batch generation failed: %s", exc)
+        return [""] * len(prompts_list)
 
 
-def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]]) -> list[EvasionScore]:
-    scored_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
-    skipped_pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]] = []
-    for question, answer_turns, pair_confidence, notes in pairs:
+def _score_pairs(
+    pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[str]]],
+    progress_callback=None,
+) -> list[EvasionScore]:
+    results: list[EvasionScore | None] = [None] * len(pairs)
+    total = len(pairs)
+
+    llm_indices: list[int] = []
+    llm_prompts: list[str] = []
+    llm_answers: list[str] = []
+    llm_question_parts: list[list[str]] = []
+    skipped = 0
+
+    for idx, (question, answer_turns, pair_confidence, notes) in enumerate(pairs):
         if pair_confidence < config.MIN_QA_PAIR_CONFIDENCE:
-            skipped_pairs.append((question, answer_turns, pair_confidence, notes))
-            continue
-        scored_pairs.append((question, answer_turns, pair_confidence, notes))
-
-    if not scored_pairs:
-        return [
-            _build_evasion_score(
+            results[idx] = _build_evasion_score(
                 question,
                 answer_turns,
                 responsiveness=10,
@@ -475,26 +515,64 @@ def _score_pairs(pairs: list[tuple[SpeakerTurn, list[SpeakerTurn], float, list[s
                 source="skipped_low_confidence",
                 notes=notes,
             )
-            for question, answer_turns, pair_confidence, notes in skipped_pairs
-        ]
+            skipped += 1
+        else:
+            prompt, answer, question_parts = _build_evasion_prompt(question, answer_turns)
+            llm_indices.append(idx)
+            llm_prompts.append(prompt)
+            llm_answers.append(answer)
+            llm_question_parts.append(question_parts)
 
-    results: list[EvasionScore] = []
-    for chunk in _chunked(scored_pairs, config.EVASION_BATCH_SIZE):
-        results.extend(_score_scored_pairs_batch(chunk))
-    results.extend(
-        _build_evasion_score(
+    batch_size = max(1, config.EVASION_BATCH_SIZE)
+    completed = skipped
+    llm_outcomes: dict[int, tuple[ScoreTuple, str]] = {}
+
+    for batch_start in range(0, len(llm_indices), batch_size):
+        batch_local = list(range(batch_start, min(batch_start + batch_size, len(llm_indices))))
+        responses = _run_batch([llm_prompts[i] for i in batch_local])
+
+        retry_locals: list[int] = []
+        for offset, local_idx in enumerate(batch_local):
+            tup = _resolve_llm_response(responses[offset], llm_answers[local_idx], llm_question_parts[local_idx])
+            if tup is not None:
+                llm_outcomes[llm_indices[local_idx]] = (tup, "model")
+            else:
+                LOGGER.debug("Evasion response missing SCORE line: %r", responses[offset][:200])
+                retry_locals.append(local_idx)
+
+        if retry_locals:
+            retry_responses = _run_batch([llm_prompts[i] + RETRY_SUFFIX for i in retry_locals])
+            for retry_pos, local_idx in enumerate(retry_locals):
+                pair_idx = llm_indices[local_idx]
+                tup = _resolve_llm_response(retry_responses[retry_pos], llm_answers[local_idx], llm_question_parts[local_idx])
+                if tup is not None:
+                    llm_outcomes[pair_idx] = (tup, "model")
+                else:
+                    LOGGER.info("Using heuristic fallback for evasion scoring after batch retry failure: %r", retry_responses[retry_pos][:200])
+                    question_text = pairs[pair_idx][0].text
+                    fallback = _heuristic_score_tuple(question_text, llm_answers[local_idx], llm_question_parts[local_idx])
+                    llm_outcomes[pair_idx] = (fallback, "heuristic_fallback")
+
+        completed += len(batch_local)
+        if progress_callback:
+            fraction = 0.2 + 0.75 * (completed / max(1, total))
+            progress_callback(min(0.95, fraction), f"Scored {completed} of {total} Q&A pairs")
+
+    for local_idx, pair_idx in enumerate(llm_indices):
+        question, answer_turns, pair_confidence, notes = pairs[pair_idx]
+        (responsiveness, reasoning, coverage), source = llm_outcomes[pair_idx]
+        results[pair_idx] = _build_evasion_score(
             question,
             answer_turns,
-            responsiveness=10,
-            reasoning="Skipped scoring because speaker parsing confidence was too low.",
+            responsiveness,
+            reasoning,
+            coverage=coverage,
             pair_confidence=pair_confidence,
-            low_confidence=True,
-            source="skipped_low_confidence",
+            source=source,
             notes=notes,
         )
-        for question, answer_turns, pair_confidence, notes in skipped_pairs
-    )
-    return results
+
+    return [r for r in results if r is not None]
 
 
 def analyze_evasion(transcript: Transcript, progress_callback=None) -> list[EvasionScore]:
@@ -504,7 +582,10 @@ def analyze_evasion(transcript: Transcript, progress_callback=None) -> list[Evas
         return []
     if progress_callback:
         progress_callback(0.2, f"Scoring {len(pairs)} Q&A pairs")
-    results = _score_pairs(pairs)
+    try:
+        results = _score_pairs(pairs, progress_callback=progress_callback)
+    finally:
+        clear_model_memory()
     if progress_callback:
         progress_callback(1.0, f"Scored {len(pairs)} Q&A pairs")
     return results
